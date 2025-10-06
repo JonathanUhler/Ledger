@@ -312,11 +312,12 @@ class Statement:
         A struct that describes the columns in the statement file.
 
         Attributes:
-         num_header_rows (int): The number of header rows at the start of the file to exclude.
-         date_index (int):      The zero-aligned column index of the transaction date.
-         date_format (str):     The format of dates in the file for Python's datetime library.
-         amount_index (int):    The zero-aligned column index of the transaction amount.
-         memo_index (int):      The zero-aligned column index of the transaction memo/description.
+         num_header_rows (int):  The number of header rows at the start of the file to exclude.
+         date_index (int):       The zero-aligned column index of the transaction date.
+         date_format (str):      The format of dates in the file for Python's datetime library.
+         amount_index (int):     The zero-aligned column index of the transaction amount.
+         memo_index (int):       The zero-aligned column index of the transaction memo/description.
+         filter_func (Callable): A filtering function that can post-process transaction data.
         """
 
         num_header_rows: int
@@ -324,6 +325,36 @@ class Statement:
         date_format: str
         amount_index: int
         memo_index: int
+        filter_func: Callable
+
+
+    class Filters:
+        """
+        Filters for importing transactions from a statement.
+        """
+
+        def charles_schwab_csv_filter(row: list, col_map: 'ColumnMap') -> bool:
+            """
+            Filters transactions in Charles Schwab CSV account history files to report only
+            the amount in all the investing accounts.
+
+            Args:
+             row (list):          The row to filter. Data will be changed in this row as needed.
+             col_map (ColumnMap): The column map to use for getting fields from the row.
+
+            Returns:
+             bool: Whether to keep or reject (skip) the transaction.
+            """
+
+            action: str = row[1]
+            if (action in {"MoneyLink Transfer",
+                           "Reinvest Dividend",
+                           "Credit Interest",
+                           "Short Term Cap Gain Reinvest"}):
+                if (action == "MoneyLink Transfer"):
+                    row[col_map.date_index] = row[col_map.date_index].split(" as of ")[0]
+                return True
+            return False
 
 
     # A list of pre-defined maps for all supported transaction statement types
@@ -332,12 +363,14 @@ class Statement:
                                         date_index = 0,
                                         date_format = "%m/%d/%Y",
                                         amount_index = 1,
-                                        memo_index = 4),
+                                        memo_index = 4,
+                                        filter_func = None),
         Type.CHARLES_SCHWAB_CSV: ColumnMap(num_header_rows = 1,
                                            date_index = 0,
                                            date_format = "%m/%d/%Y",
                                            amount_index = 7,
-                                           memo_index = 3)
+                                           memo_index = 3,
+                                           filter_func = Filters.charles_schwab_csv_filter)
     }
 
 
@@ -382,6 +415,10 @@ class Statement:
          StatementParseError: If any of the data in the row is missing or cannot be parsed.
         """
 
+        if (self.col_map.filter_func is not None and
+            not self.col_map.filter_func(row, self.col_map)):
+            return None
+
         try:
             date: datetime.date = convert_string_to_date(row[self.col_map.date_index],
                                                          date_format = self.col_map.date_format)
@@ -410,7 +447,9 @@ class Statement:
 
         transactions: list = []
         for row in self.rows:
-            transactions.append(self._get_transaction_from_row(row))
+            transaction: Transaction = self._get_transaction_from_row(row)
+            if (transaction is not None):
+                transactions.append(transaction)
         return transactions
 
 
