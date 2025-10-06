@@ -272,7 +272,8 @@ def convert_date_to_string(date: datetime.date, date_format: str = "%Y-%m-%d") -
     Returns:
      str: The date object as a string.
     """
-
+    if (not isinstance(date, datetime.date)):
+        return date
     return date.strftime(date_format)
 
 
@@ -1156,6 +1157,15 @@ def process_transactions(args: Namespace):
         searchers.append(Searcher.get_category_searcher(*args.by_category))
 
     transactions: list = account.search_transactions(searchers)
+    if (args.show_total):
+        transactions.append(Transaction(
+            date = "-- TOTAL --",
+            cents = sum(transaction.cents for transaction in transactions),
+            statement_memo = "-- TOTAL --",
+            user_memo = "-- TOTAL --",
+            category = "-- TOTAL --",
+            reconciled = False
+        ))
 
     widest_date: int = 0
     widest_amount: int = 0
@@ -1170,7 +1180,27 @@ def process_transactions(args: Namespace):
         widest_statement_memo = max(widest_statement_memo, len(transaction.statement_memo))
         widest_user_memo = max(widest_user_memo, len(transaction.user_memo))
 
+    if (args.format == "csv"):
+        print("Date,Amount,Category,Description,Memo")
+    elif (args.format == "markdown"):
+        print(f"| {'Date'.ljust(widest_date)} | " +
+              f"{'Amount'.ljust(widest_amount)} | " +
+              f"{'Category'.ljust(widest_category)} | " +
+              f"{'Description'.ljust(widest_statement_memo)} | " +
+              f"{'Memo'.ljust(widest_user_memo)} |")
+        print("| " + " | ".join(["-" * widest_date,
+                                 "-" * widest_amount,
+                                 "-" * widest_category,
+                                 "-" * widest_statement_memo,
+                                 "-" * widest_user_memo]) + " |")
+    else:
+        log.critical(f"Unknown transaction format '{args.format}'; this is a logic error")
+        sys.exit(1)
+
     for transaction in transactions:
+        if (args.invert_signs):
+            transaction.cents = -transaction.cents
+
         if (args.format == "csv"):
             print(f"{convert_date_to_string(transaction.date)}," +
                   f"{convert_cents_to_amount(transaction.cents)}," +
@@ -1317,6 +1347,10 @@ def add_transactions_parser(subparsers: list) -> None:
     transactions_parser.add_argument("--format", type = str,
                                      choices = {"csv", "markdown"}, default = "markdown",
                                      help = "the name of the account to view transactions in")
+    transactions_parser.add_argument("--show_total", action = "store_true",
+                                     help = "add a final row with the sum of all transactions")
+    transactions_parser.add_argument("--invert_signs", action = "store_true",
+                                     help = "invert the signs of all transactions")
 
 
 def main() -> None:
