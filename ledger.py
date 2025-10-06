@@ -1146,14 +1146,19 @@ def process_transactions(args: Namespace):
     account_name: str = args.account
     account: Account = Account(account_name)
 
+    searcher_comments: list = []
     searchers: list = []
     if (args.all):
+        searcher_comments.append("all transactions")
         searchers.append(Searcher.get_unconditional_searcher())
     if (args.by_dates):
+        searcher_comments.append(f"dates: {args.by_dates}")
         searchers.append(Searcher.get_date_range_searcher(*args.by_dates))
     if (args.by_amounts):
+        searcher_comments.append(f"cents: {args.by_amounts}")
         searchers.append(Searcher.get_amount_range_searcher(*args.by_amounts))
     if (args.by_category):
+        searcher_comments.append(f"categories: {args.by_category}")
         searchers.append(Searcher.get_category_searcher(*args.by_category))
 
     transactions: list = account.search_transactions(searchers)
@@ -1181,8 +1186,12 @@ def process_transactions(args: Namespace):
         widest_user_memo = max(widest_user_memo, len(transaction.user_memo))
 
     if (args.format == "csv"):
+        if (args.show_filters):
+            print(",".join(searcher_comment for searcher_comment in searcher_comments))
         print("Date,Amount,Category,Description,Memo")
     elif (args.format == "markdown"):
+        if (args.show_filters):
+            print("# " + ", ".join(searcher_comment for searcher_comment in searcher_comments))
         print(f"| {'Date'.ljust(widest_date)} | " +
               f"{'Amount'.ljust(widest_amount)} | " +
               f"{'Category'.ljust(widest_category)} | " +
@@ -1349,6 +1358,8 @@ def add_transactions_parser(subparsers: list) -> None:
                                      help = "the name of the account to view transactions in")
     transactions_parser.add_argument("--show_total", action = "store_true",
                                      help = "add a final row with the sum of all transactions")
+    transactions_parser.add_argument("--show_filters", action = "store_true",
+                                     help = "add a comment showing the filters used")
     transactions_parser.add_argument("--invert_signs", action = "store_true",
                                      help = "invert the signs of all transactions")
 
