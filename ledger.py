@@ -59,63 +59,54 @@ class AmountConversionError(ValueError):
     """
     An amount of money (as a string) is invalid and cannot be converted to an integer.
     """
-    pass
 
 
 class DateConversionError(ValueError):
     """
     A date (as a string) is formatted incorrectly and cannot be converted to an integer.
     """
-    pass
 
 
 class StatementFileError(OSError):
     """
     A file I/O error occured when performing operations on a transaction statement file.
     """
-    pass
 
 
 class UnsupportedStatementError(ValueError):
     """
     The type/format of a transaction statement is not supported.
     """
-    pass
 
 
 class StatementParseError(ValueError):
     """
     A transaction statement contained invalid data and could not be parsed.
     """
-    pass
 
 
 class MissingAccountError(FileNotFoundError):
     """
     A specified account does not exist.
     """
-    pass
 
 
 class AccountFileError(OSError):
     """
     A file I/O error occured when performing operations on an account file.
     """
-    pass
 
 
 class AccountParseError(ValueError):
     """
     An account file contained invalid data and could not be parsed.
     """
-    pass
 
 
 class InvalidCategoryError(ValueError):
     """
     A transaction category does not exist or is formatted incorrectly.
     """
-    pass
 
 
 ####################################################################################################
@@ -333,6 +324,7 @@ class Statement:
         Filters for importing transactions from a statement.
         """
 
+        @staticmethod
         def charles_schwab_csv_filter(row: list, col_map: 'ColumnMap') -> bool:
             """
             Filters transactions in Charles Schwab CSV account history files to report only
@@ -981,13 +973,16 @@ class Searcher:
 ####################################################################################################
 
 
+DEFAULT_COLUMNS: Final = ["Date", "Amount", "Account", "Category", "Description", "Memo"]
+
+
 def process_accounts(_: Namespace):
     """
     Process the 'ledger accounts' command.
     """
 
     if (not os.path.exists(Account.ACCOUNTS_PATH)):
-        log.info(f"No accounts exist")
+        log.info("No accounts exist")
         return
 
     folders: str = [name for name in os.listdir(Account.ACCOUNTS_PATH)
@@ -1211,36 +1206,41 @@ def process_transactions(args: Namespace):
             reconciled = False
         ))
 
-    widest_date: int = 0
-    widest_amount: int = 0
-    widest_category: int = 0
-    widest_statement_memo: int = 0
-    widest_user_memo: int = 0
+    columns: list = args.show_columns
+    for column in columns:
+        if (column not in DEFAULT_COLUMNS):
+            raise InvalidCategoryError(f"column '{column}' is not supported")
+    widest_fields: dict = {column: 0 for column in DEFAULT_COLUMNS}
 
     for transaction in transactions:
-        widest_date = max(widest_date, len(convert_date_to_string(transaction.date)))
-        widest_amount = max(widest_amount, len(convert_cents_to_amount(transaction.cents)))
-        widest_category = max(widest_category, len(transaction.category))
-        widest_statement_memo = max(widest_statement_memo, len(transaction.statement_memo))
-        widest_user_memo = max(widest_user_memo, len(transaction.user_memo))
+        widest_fields["Date"] = max(
+            widest_fields["Date"], len(convert_date_to_string(transaction.date))
+        )
+        widest_fields["Amount"] = max(
+            widest_fields["Amount"], len(convert_cents_to_amount(transaction.cents))
+        )
+        widest_fields["Account"] = max(
+            widest_fields["Account"], len(account_name)
+        )
+        widest_fields["Category"] = max(
+            widest_fields["Category"], len(transaction.category)
+        )
+        widest_fields["Description"] = max(
+            widest_fields["Description"], len(transaction.statement_memo)
+        )
+        widest_fields["Memo"] = max(
+            widest_fields["Memo"], len(transaction.user_memo)
+        )
 
     if (args.format == "csv"):
         if (args.show_filters):
             print(",".join(searcher_comment for searcher_comment in searcher_comments))
-        print("Date,Amount,Category,Description,Memo")
+        print(",".join(columns))
     elif (args.format == "markdown"):
         if (args.show_filters):
             print("# " + ", ".join(searcher_comment for searcher_comment in searcher_comments))
-        print(f"| {'Date'.ljust(widest_date)} | " +
-              f"{'Amount'.ljust(widest_amount)} | " +
-              f"{'Category'.ljust(widest_category)} | " +
-              f"{'Description'.ljust(widest_statement_memo)} | " +
-              f"{'Memo'.ljust(widest_user_memo)} |")
-        print("| " + " | ".join(["-" * widest_date,
-                                 "-" * widest_amount,
-                                 "-" * widest_category,
-                                 "-" * widest_statement_memo,
-                                 "-" * widest_user_memo]) + " |")
+        print("| " + " | ".join([column.ljust(widest_fields[column]) for column in columns]) + " |")
+        print("| " + " | ".join(["-" * widest_fields[column] for column in columns]) + " |")
     else:
         log.critical(f"Unknown transaction format '{args.format}'; this is a logic error")
         sys.exit(1)
@@ -1249,18 +1249,21 @@ def process_transactions(args: Namespace):
         if (args.invert_signs):
             transaction.cents = -transaction.cents
 
+        fields: dict = {
+            "Date": convert_date_to_string(transaction.date),
+            "Amount": convert_cents_to_amount(transaction.cents),
+            "Account": account_name,
+            "Category": transaction.category,
+            "Description": transaction.statement_memo,
+            "Memo": transaction.user_memo
+        }
+
         if (args.format == "csv"):
-            print(f"{convert_date_to_string(transaction.date)}," +
-                  f"{convert_cents_to_amount(transaction.cents)}," +
-                  f"{transaction.category}," +
-                  f"{transaction.statement_memo}," +
-                  f"{transaction.user_memo}")
+            print(",".join([fields[column] for column in columns]))
         elif (args.format == "markdown"):
-            print(f"| {convert_date_to_string(transaction.date).rjust(widest_date)} | " +
-                  f"{convert_cents_to_amount(transaction.cents).rjust(widest_amount)} | " +
-                  f"{transaction.category.ljust(widest_category)} | " +
-                  f"{transaction.statement_memo.ljust(widest_statement_memo)} | " +
-                  f"{transaction.user_memo.ljust(widest_user_memo)} |")
+            print(
+                "| " + " | ".join([fields[col].ljust(widest_fields[col]) for col in columns]) + " |"
+            )
         else:
             log.critical(f"Unknown transactions format '{args.format}'; this is a logic error")
             sys.exit(1)
@@ -1383,18 +1386,21 @@ def add_transactions_parser(subparsers: list) -> None:
                                      help = "the name of the account to view transactions in")
     transactions_parser.add_argument("--all", action = "store_true",
                                      help = "show all transactions in the account")
-    transactions_parser.add_argument("--by-dates", nargs = 2, type = convert_string_to_date,
+    transactions_parser.add_argument("--by_dates", nargs = 2, type = convert_string_to_date,
                                      metavar = "YYYY-MM-DD",
                                      help = "show transactions in the date range, inclusive")
-    transactions_parser.add_argument("--by-amounts", nargs = 2, type = convert_amount_to_cents,
+    transactions_parser.add_argument("--by_amounts", nargs = 2, type = convert_amount_to_cents,
                                      metavar = "AMOUNT",
                                      help = "show transactions in the amount range, inclusive")
-    transactions_parser.add_argument("--by-category", nargs = 1, type = str,
+    transactions_parser.add_argument("--by_category", nargs = 1, type = str,
                                      metavar = "CATEGORY",
                                      help = "show transactions in the category or a subcategory")
     transactions_parser.add_argument("--format", type = str,
                                      choices = {"csv", "markdown"}, default = "markdown",
                                      help = "the name of the account to view transactions in")
+    transactions_parser.add_argument("--show_columns", nargs = '+', type = str,
+                                     default = DEFAULT_COLUMNS,
+                                     help = "specify which columns to output and their order")
     transactions_parser.add_argument("--show_total", action = "store_true",
                                      help = "add a final row with the sum of all transactions")
     transactions_parser.add_argument("--show_filters", action = "store_true",
