@@ -1,3 +1,5 @@
+# pylint: disable=too-many-lines
+
 """
 A basic command line ledger for reconciling and storing CSV transaction information.
 
@@ -519,8 +521,8 @@ class Account:
                 yaml.dump({"statement_type": None, "categories": []}, f)
             log.debug(f"Made account metadata file at {self.metadata_path}")
 
-            with open(self.transactions_path, "w", encoding = "utf-8") as _:
-                pass
+            with open(self.transactions_path, "w", encoding = "utf-8") as f:
+                yaml.dump([], f)
             log.debug(f"Made account transactions file at {self.transactions_path}")
         except OSError as os_error:
             raise AccountFileError(f"cannot create account: {os_error}") from os_error
@@ -644,12 +646,11 @@ class Account:
 
         log.debug(f"Attempting to open transactions file at {self.transactions_path}")
         try:
-            with open(self.transactions_path, "r", encoding = "utf-8", newline = "") as f:
-                csv_reader = csv.reader(f)
-                rows: list = list(csv_reader)
+            with open(self.transactions_path, "r", encoding = "utf-8") as f:
+                rows: list = yaml.safe_load(f)
                 log.debug(f"Read {len(rows)} rows from transactions file")
 
-                self._set_transactions_from_csv(rows)
+                self._set_transactions_from_yaml(rows)
                 log.debug("Successfully loaded account transaction data")
         except OSError as os_error:
             raise AccountFileError(f"cannot open transactions file: {os_error}") from os_error
@@ -665,18 +666,17 @@ class Account:
 
         log.debug(f"Attempting to save transactions file to {self.transactions_path}")
         try:
-            with open(self.transactions_path, "w", encoding = "utf-8", newline = "") as f:
-                csv_writer = csv.writer(f)
-                rows: list = self._get_transactions_as_csv()
+            with open(self.transactions_path, "w", encoding = "utf-8") as f:
+                rows: list = self._get_transactions_as_yaml()
                 log.debug(f"Collected {len(rows)} rows for writing")
 
-                csv_writer.writerows(rows)
+                yaml.dump(rows, f)
                 log.debug("Successfully wrote account transaction data")
         except OSError as os_error:
             raise AccountFileError(f"cannot save transactions file: {os_error}") from os_error
 
 
-    def _set_transactions_from_csv(self, rows: list) -> None:
+    def _set_transactions_from_yaml(self, rows: list) -> None:
         """
         Converts all the provided rows to transaction objects and adds them to the transactions list
         in chronological order.
@@ -691,45 +691,41 @@ class Account:
         for row in rows:
             try:
                 transaction: Transaction = Transaction(
-                    date = convert_string_to_date(row[0]),
-                    cents = int(row[1]),
-                    statement_memo = row[2],
-                    user_memo = row[3],
-                    category = row[4],
-                    reconciled = bool(row[5])
+                    date = convert_string_to_date(row.get("date")),
+                    cents = row.get("cents"),
+                    statement_memo = row.get("statement_memo"),
+                    user_memo = row.get("user_memo"),
+                    category = row.get("category"),
+                    reconciled = row.get("reconciled")
                 )
-            except IndexError as index_error:
-                raise AccountParseError("transaction in account is missing data") from index_error
+            except KeyError as key_error:
+                raise AccountParseError("transaction in account is missing data") from key_error
             except DateConversionError as convert_error:
                 raise AccountParseError(
                     f"transaction in account has invalid date: {row[0]}"
                 ) from convert_error
-            except ValueError as value_error:
-                raise AccountParseError(
-                    f"transaction in account has invalid amount: {row[1]}"
-                ) from value_error
 
             self._insert_transaction_by_date(transaction)
 
 
-    def _get_transactions_as_csv(self) -> list:
+    def _get_transactions_as_yaml(self) -> list:
         """
-        Converts the transactions list to a list of CSV rows.
+        Converts the transactions list to a list of YAML data.
 
         Returns:
-         list: The list of CSV rows.
+         list: The list of YAML data.
         """
 
         rows: list = []
         for transaction in self.transactions:
-            row: list = [
-                convert_date_to_string(transaction.date),
-                str(transaction.cents),
-                transaction.statement_memo,
-                transaction.user_memo,
-                transaction.category,
-                str(transaction.reconciled)
-            ]
+            row: dict = {
+                "date": convert_date_to_string(transaction.date),
+                "cents": transaction.cents,
+                "statement_memo": transaction.statement_memo,
+                "user_memo": transaction.user_memo,
+                "category": transaction.category,
+                "reconciled": transaction.reconciled
+            }
             rows.append(row)
         return rows
 
@@ -1210,7 +1206,7 @@ def process_transactions(args: Namespace):
     for column in columns:
         if (column not in DEFAULT_COLUMNS):
             raise InvalidCategoryError(f"column '{column}' is not supported")
-    widest_fields: dict = {column: 0 for column in DEFAULT_COLUMNS}
+    widest_fields: dict = {column: len(column) for column in DEFAULT_COLUMNS}
 
     for transaction in transactions:
         widest_fields["Date"] = max(
