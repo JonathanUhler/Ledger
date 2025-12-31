@@ -125,6 +125,7 @@ class Transaction:
      date (datetime.date): The date that the transaction took place.
      cents (int):          The signed transaction amount, in cents.
      statement_memo (str): The memo provided by the transaction statement file.
+     account (str):        The banking account that this transaction is associated with.
      user_memo (str):      The memo provided by the user during reconciliation.
      category (str):       The category provided by the user during reconciliation.
      reconciled (bool):    Whether the transactions has been reconciled.
@@ -133,6 +134,7 @@ class Transaction:
     date: datetime.date
     cents: int
     statement_memo: str
+    account: str
 
     user_memo: str
     category: str
@@ -143,14 +145,14 @@ class Transaction:
         """
         Returns a hash code for this transaction, used to determine set membership and equality.
 
-        The hash code is determined by the date, amount, and statement memo, but not any of the
-        user-defined fields.
+        The hash code is determined by the date, amount, statement memo, and account, but not any
+        of the user-defined fields.
 
         Returns:
          int: Hash code for this transaction.
         """
 
-        return hash(f"{self.date}_{self.cents}_{self.statement_memo}")
+        return hash(f"{self.date}_{self.cents}_{self.statement_memo}_{self.account}")
 
 
     def __eq__(self, other: 'Transaction') -> bool:
@@ -426,6 +428,7 @@ class Statement:
         return Transaction(date = date,
                            cents = cents,
                            statement_memo = statement_memo,
+                           account = None,
                            user_memo = None,
                            category = None,
                            reconciled = False)
@@ -694,6 +697,7 @@ class Account:
                     date = convert_string_to_date(row.get("date")),
                     cents = row.get("cents"),
                     statement_memo = row.get("statement_memo"),
+                    account = row.get("account"),
                     user_memo = row.get("user_memo"),
                     category = row.get("category"),
                     reconciled = row.get("reconciled")
@@ -722,6 +726,7 @@ class Account:
                 "date": convert_date_to_string(transaction.date),
                 "cents": transaction.cents,
                 "statement_memo": transaction.statement_memo,
+                "account": transaction.account,
                 "user_memo": transaction.user_memo,
                 "category": transaction.category,
                 "reconciled": transaction.reconciled
@@ -780,6 +785,7 @@ class Account:
             reconciler(self, transaction)
             transaction.reconciled = True
 
+        transaction.account = self.name
         self._insert_transaction_by_date(transaction)
         self._save_transactions_file()
         return True
@@ -1042,6 +1048,7 @@ def process_adjust(args: Namespace):
         date = datetime.date.today(),
         cents = adjustment,
         statement_memo = "Balance adjustment",
+        account = account_name,
         user_memo = "Balance adjustment",
         category = "Adjustment",
         reconciled = True
@@ -1197,6 +1204,7 @@ def process_transactions(args: Namespace):
             date = "-- TOTAL --",
             cents = sum(transaction.cents for transaction in transactions),
             statement_memo = "-- TOTAL --",
+            account = "-- TOTAL --",
             user_memo = "-- TOTAL --",
             category = "-- TOTAL --",
             reconciled = False
