@@ -474,6 +474,22 @@ class Account:
     ACCOUNTS_PATH: Final = os.path.abspath(os.path.join(str(Path.home()), ".ledger"))
 
 
+    @staticmethod
+    def get_all_account_names() -> list:
+        """
+        Get the names of all accounts in the accounts path for the current user.
+
+        Returns:
+         list: All account names.
+        """
+
+        names: str = []
+        for name in os.listdir(Account.ACCOUNTS_PATH):
+            if (os.path.isdir(os.path.join(Account.ACCOUNTS_PATH, name))):
+                names.append(name)
+        return names
+
+
     def __init__(self, account_name: str, create_if_not_exists: bool = False):
         """
         Constructs a new account manager object.
@@ -987,9 +1003,7 @@ def process_accounts(_: Namespace):
         log.info("No accounts exist")
         return
 
-    folders: str = [name for name in os.listdir(Account.ACCOUNTS_PATH)
-                    if os.path.isdir(os.path.join(Account.ACCOUNTS_PATH, name))]
-
+    folders: str = Account.get_all_account_names()
     num_accounts: int = 0
     total_net_cents: int = 0
 
@@ -1180,13 +1194,14 @@ def process_transactions(args: Namespace):
      args (Namespace): The command line arguments.
     """
 
-    account_name: str = args.account
-    account: Account = Account(account_name)
-
+    account_names: str = args.account
+    if (len(account_names) == 0):
+        account_names = Account.get_all_account_names()
+    transactions: list = []
     searcher_comments: list = []
     searchers: list = []
     if (args.all):
-        searcher_comments.append("all transactions")
+        searcher_comments.append(f"all transactions")
         searchers.append(Searcher.get_unconditional_searcher())
     if (args.by_dates):
         searcher_comments.append(f"dates: {args.by_dates}")
@@ -1198,7 +1213,10 @@ def process_transactions(args: Namespace):
         searcher_comments.append(f"categories: {args.by_category}")
         searchers.append(Searcher.get_category_searcher(*args.by_category))
 
-    transactions: list = account.search_transactions(searchers)
+    for account_name in account_names:
+        account: Account = Account(account_name)
+        transactions += account.search_transactions(searchers)
+
     if (args.show_total):
         transactions.append(Transaction(
             date = "-- TOTAL --",
@@ -1224,7 +1242,7 @@ def process_transactions(args: Namespace):
             widest_fields["Amount"], len(convert_cents_to_amount(transaction.cents))
         )
         widest_fields["Account"] = max(
-            widest_fields["Account"], len(account_name)
+            widest_fields["Account"], len(transaction.account)
         )
         widest_fields["Category"] = max(
             widest_fields["Category"], len(transaction.category)
@@ -1256,7 +1274,7 @@ def process_transactions(args: Namespace):
         fields: dict = {
             "Date": convert_date_to_string(transaction.date),
             "Amount": convert_cents_to_amount(transaction.cents),
-            "Account": account_name,
+            "Account": transaction.account,
             "Category": transaction.category,
             "Description": transaction.statement_memo,
             "Memo": transaction.user_memo
@@ -1386,8 +1404,8 @@ def add_transactions_parser(subparsers: list) -> None:
     transactions_parser: ArgumentParser = subparsers.add_parser(
         "transactions", description = "Analyze transactions in an account."
     )
-    transactions_parser.add_argument("account", type = str,
-                                     help = "the name of the account to view transactions in")
+    transactions_parser.add_argument("account", nargs = "*", type = str,
+                                     help = "the name of the account(s) to view transactions in")
     transactions_parser.add_argument("--all", action = "store_true",
                                      help = "show all transactions in the account")
     transactions_parser.add_argument("--by_dates", nargs = 2, type = convert_string_to_date,
@@ -1402,7 +1420,7 @@ def add_transactions_parser(subparsers: list) -> None:
     transactions_parser.add_argument("--format", type = str,
                                      choices = {"csv", "markdown"}, default = "markdown",
                                      help = "the name of the account to view transactions in")
-    transactions_parser.add_argument("--show_columns", nargs = '+', type = str,
+    transactions_parser.add_argument("--show_columns", nargs = "+", type = str,
                                      default = DEFAULT_COLUMNS,
                                      help = "specify which columns to output and their order")
     transactions_parser.add_argument("--show_total", action = "store_true",
