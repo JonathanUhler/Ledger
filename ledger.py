@@ -783,6 +783,7 @@ class Account:
          bool: Whether the transaction was added.
         """
 
+        transaction.account = self.name
         if (transaction in self.transactions and not force):
             log.debug("Not adding transaction; transaction exists and force is disabled")
             return False
@@ -801,7 +802,6 @@ class Account:
             reconciler(self, transaction)
             transaction.reconciled = True
 
-        transaction.account = self.name
         self._insert_transaction_by_date(transaction)
         self._save_transactions_file()
         return True
@@ -970,19 +970,19 @@ class Searcher:
 
 
     @staticmethod
-    def get_category_searcher(top_category: str) -> Callable:
+    def get_category_searcher(top_categories: list) -> Callable:
         """
         Gets a searcher that filters for transactions in the provided category and any of its
         subcategories.
 
         Args:
-         top_category (str): The highest parent category to allow. Any subcategories are also
-                             allowed.
+         top_categories (list): The highest parent category(ies) to allow. Any subcategories are
+                                also allowed.
         """
 
         def category_searcher(transaction: Transaction) -> bool:
-            return transaction.category.startswith(top_category)
-        log.debug(f"Created category searcher for '{top_category}'")
+            return any(transaction.category.startswith(category) for category in top_categories)
+        log.debug(f"Created category searcher for '{top_categories}'")
         return category_searcher
 
 
@@ -1164,6 +1164,76 @@ def process_create(args: Namespace):
     log.info(f"Successfully created account '{account_name}'")
 
 
+def process_graph(args: Namespace):
+    """
+    Process the 'ledger graph' command.
+
+    Args:
+     args (Namespace): The command line arguments.
+    """
+
+    import matplotlib.pyplot as plt
+
+    account_names: str = args.account
+    if (len(account_names) == 0):
+        account_names = Account.get_all_account_names()
+    transactions: list = []
+    searchers: list = []
+    if (args.all):
+        searchers.append(Searcher.get_unconditional_searcher())
+    if (args.by_dates):
+        searchers.append(Searcher.get_date_range_searcher(*args.by_dates))
+    if (args.by_amounts):
+        searchers.append(Searcher.get_amount_range_searcher(*args.by_amounts))
+    if (args.by_category):
+        searchers.append(Searcher.get_category_searcher(args.by_category))
+
+    for account_name in account_names:
+        account: Account = Account(account_name)
+        transactions += account.search_transactions(searchers)
+
+    expenses: list = []
+    incomes: list = []
+    for transaction in transactions:
+        if (transaction.cents < 0):
+            expenses.append(transaction)
+        else:
+            incomes.append(transaction)
+
+    if (args.type == "line"):
+        # If start month and end month for date range is the same, group expenses/income by day
+        # Else group expenses/income by month
+        # Graph
+        pass
+    elif (args.type == "pie"):
+        expense_groups: dict = {}
+        for expense in expenses:
+            expense_groups[expense.category] = \
+                expense_groups.get(expense.category, 0) - expense.cents
+        expense_groups = dict(sorted(expense_groups.items(), key = lambda item: item[1]))
+
+        income_groups: dict = {}
+        for income in incomes:
+            income_groups[income.category] = \
+                income_groups.get(income.category, 0) + income.cents
+
+        _, (expense_graph, income_graph) = plt.subplots(1, 2, figsize=(12, 6))
+        expense_graph.pie(list(expense_groups.values()), labels = list(expense_groups.keys()), autopct='%1.1f%%')
+        expense_graph.set_title("Expenses")
+        income_graph.pie(list(income_groups.values()), labels = list(income_groups.keys()), autopct='%1.1f%%')
+        income_graph.set_title("Income")
+        plt.tight_layout()
+        plt.show()
+        pass
+    elif (args.type == "bar"):
+        # If start month and end month for date range is the same, group expenses/income by day
+        # Else group expenses/income by month
+        # Graph
+        pass
+    else:
+        raise ValueError(f"unknown graph type '{args.type}'")
+
+
 def process_reconcile(args: Namespace):
     """
     Process the 'ledger reconcile' command.
@@ -1211,7 +1281,7 @@ def process_transactions(args: Namespace):
         searchers.append(Searcher.get_amount_range_searcher(*args.by_amounts))
     if (args.by_category):
         searcher_comments.append(f"categories: {args.by_category}")
-        searchers.append(Searcher.get_category_searcher(*args.by_category))
+        searchers.append(Searcher.get_category_searcher(args.by_category))
 
     for account_name in account_names:
         account: Account = Account(account_name)
@@ -1376,6 +1446,34 @@ def add_create_parser(subparsers: list) -> None:
                                help = "the type of statements this account is configured to read")
 
 
+def add_graph_parser(subparsers: list) -> None:
+    """
+    Adds the argument parser for 'ledger graph'.
+
+    Args:
+     subparsers (list): The list of subparsers to add to
+    """
+
+    graph_parser: ArgumentParser = subparsers.add_parser(
+        "graph", description = "Analyze transactions in an account as graphs."
+    )
+    graph_parser.add_argument("account", nargs = "*", type = str,
+                              help = "the name of the account(s) to view transactions in")
+    graph_parser.add_argument("type", choices = {"line", "pie", "bar"}, type = str,
+                              help = "the type of graph to generate")
+    graph_parser.add_argument("--all", action = "store_true",
+                              help = "show all transactions in the account")
+    graph_parser.add_argument("--by_dates", nargs = 2, type = convert_string_to_date,
+                              metavar = "YYYY-MM-DD",
+                              help = "show transactions in the date range, inclusive")
+    graph_parser.add_argument("--by_amounts", nargs = 2, type = convert_amount_to_cents,
+                              metavar = "AMOUNT",
+                              help = "show transactions in the amount range, inclusive")
+    graph_parser.add_argument("--by_category", nargs = "+", type = str,
+                              metavar = "CATEGORY",
+                              help = "show transactions in the category or a subcategory")
+
+
 def add_reconcile_parser(subparsers: list) -> None:
     """
     Adds the argument subparser for 'ledger reconcile'.
@@ -1402,7 +1500,7 @@ def add_transactions_parser(subparsers: list) -> None:
     """
 
     transactions_parser: ArgumentParser = subparsers.add_parser(
-        "transactions", description = "Analyze transactions in an account."
+        "transactions", description = "Analyze transactions in an account as tables."
     )
     transactions_parser.add_argument("account", nargs = "*", type = str,
                                      help = "the name of the account(s) to view transactions in")
@@ -1414,7 +1512,7 @@ def add_transactions_parser(subparsers: list) -> None:
     transactions_parser.add_argument("--by_amounts", nargs = 2, type = convert_amount_to_cents,
                                      metavar = "AMOUNT",
                                      help = "show transactions in the amount range, inclusive")
-    transactions_parser.add_argument("--by_category", nargs = 1, type = str,
+    transactions_parser.add_argument("--by_category", nargs = "+", type = str,
                                      metavar = "CATEGORY",
                                      help = "show transactions in the category or a subcategory")
     transactions_parser.add_argument("--format", type = str,
@@ -1447,6 +1545,7 @@ def main() -> None:
     add_adjust_parser(subparsers)
     add_category_parser(subparsers)
     add_create_parser(subparsers)
+    add_graph_parser(subparsers)
     add_reconcile_parser(subparsers)
     add_transactions_parser(subparsers)
 
@@ -1464,13 +1563,15 @@ def main() -> None:
             process_category(args)
         elif (command == "create"):
             process_create(args)
+        elif (command == "graph"):
+            process_graph(args)
         elif (command == "reconcile"):
             process_reconcile(args)
         elif (command == "transactions"):
             process_transactions(args)
         elif (command is None):
             parser.print_usage()
-            sys.exit(1)
+            sys.exit(0)
         else:
             log.critical(f"Unsupported command '{command}; this is a logic error'")
             sys.exit(1)
