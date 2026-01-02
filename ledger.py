@@ -12,6 +12,7 @@ import bisect
 import csv
 from dataclasses import dataclass
 import datetime
+from decimal import Decimal
 from enum import Enum
 import readline
 import logging
@@ -202,7 +203,7 @@ def convert_amount_to_cents(amount: str) -> int:
     amount = amount.replace("$", "")
     amount = amount.replace(",", "")
     try:
-        return int(float(amount) * 100)
+        return int(Decimal(amount) * 100)
     except ValueError as value_error:
         raise AmountConversionError(f"cannot convert dollar amount '{amount}'") from value_error
 
