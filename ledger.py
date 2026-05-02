@@ -356,11 +356,11 @@ class Statement:
 
     # A list of pre-defined maps for all supported transaction statement types
     COLUMN_MAPS: Final = {
-        Type.WELLS_FARGO_CSV: ColumnMap(num_header_rows = 0,
+        Type.WELLS_FARGO_CSV: ColumnMap(num_header_rows = 1,
                                         date_index = 0,
                                         date_format = "%m/%d/%Y",
-                                        amount_index = 1,
-                                        memo_index = 4,
+                                        amount_index = 2,
+                                        memo_index = 1,
                                         filter_func = None),
         Type.CHARLES_SCHWAB_CSV: ColumnMap(num_header_rows = 1,
                                            date_index = 0,
