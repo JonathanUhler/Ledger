@@ -19,6 +19,7 @@ import logging
 from logging import Formatter, Handler, Logger, StreamHandler
 import os
 from pathlib import Path
+import re
 import sys
 from typing import Callable, Final
 import yaml
@@ -153,7 +154,8 @@ class Transaction:
          int: Hash code for this transaction.
         """
 
-        return hash(f"{self.date}_{self.cents}_{self.statement_memo}_{self.account}")
+        normalized_statement_memo: str = normalize_string(self.statement_memo)
+        return hash(f"{self.date}_{self.cents}_{normalized_statement_memo}_{self.account}")
 
 
     def __eq__(self, other: 'Transaction') -> bool:
@@ -176,6 +178,13 @@ class Transaction:
 ####################################################################################################
 # FINANCIAL TYPE SYSTEM
 ####################################################################################################
+
+
+def normalize_string(string: str) -> str:
+    if (string is None):
+        return ""
+
+    return re.sub(r"\s+", " ", string).strip().lower()
 
 
 def convert_amount_to_cents(amount: str) -> int:
