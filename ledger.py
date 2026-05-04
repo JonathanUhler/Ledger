@@ -1210,12 +1210,7 @@ def process_graph(args: Namespace):
         else:
             incomes.append(transaction)
 
-    if (args.type == "line"):
-        # If start month and end month for date range is the same, group expenses/income by day
-        # Else group expenses/income by month
-        # Graph
-        pass
-    elif (args.type == "pie"):
+    if (args.type == "pie"):
         expense_groups: dict = {}
         for expense in expenses:
             expense_groups[expense.category] = \
@@ -1228,9 +1223,13 @@ def process_graph(args: Namespace):
                 income_groups.get(income.category, 0) + income.cents
 
         _, (expense_graph, income_graph) = plt.subplots(1, 2, figsize=(12, 6))
-        expense_graph.pie(list(expense_groups.values()), labels = list(expense_groups.keys()), autopct='%1.1f%%')
+        expense_graph.pie(list(expense_groups.values()),
+                          labels = list(expense_groups.keys()),
+                          autopct='%1.1f%%')
         expense_graph.set_title("Expenses")
-        income_graph.pie(list(income_groups.values()), labels = list(income_groups.keys()), autopct='%1.1f%%')
+        income_graph.pie(list(income_groups.values()),
+                         labels = list(income_groups.keys()),
+                         autopct='%1.1f%%')
         income_graph.set_title("Income")
         plt.tight_layout()
         plt.show()
@@ -1238,7 +1237,7 @@ def process_graph(args: Namespace):
     elif (args.type == "bar"):
         # If start month and end month for date range is the same, group expenses/income by day
         # Else group expenses/income by month
-        # Graph
+        # Graph the data
         pass
     else:
         raise ValueError(f"unknown graph type '{args.type}'")
@@ -1469,7 +1468,7 @@ def add_graph_parser(subparsers: list) -> None:
     )
     graph_parser.add_argument("account", nargs = "*", type = str,
                               help = "the name of the account(s) to view transactions in")
-    graph_parser.add_argument("type", choices = {"line", "pie", "bar"}, type = str,
+    graph_parser.add_argument("type", choices = {"pie", "bar"}, type = str,
                               help = "the type of graph to generate")
     graph_parser.add_argument("--all", action = "store_true",
                               help = "show all transactions in the account")
