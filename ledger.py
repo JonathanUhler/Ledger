@@ -1297,7 +1297,7 @@ def process_transactions(args: Namespace):
         transactions += account.search_transactions(searchers)
 
     if (args.show_total):
-        transactions.append(Transaction(
+        transactions.insert(0, Transaction(
             date = "-- TOTAL --",
             cents = sum(transaction.cents for transaction in transactions),
             statement_memo = "-- TOTAL --",
@@ -1346,7 +1346,7 @@ def process_transactions(args: Namespace):
         log.critical(f"Unknown transaction format '{args.format}'; this is a logic error")
         sys.exit(1)
 
-    for transaction in transactions:
+    for transaction in reversed(transactions):
         if (args.invert_signs):
             transaction.cents = -transaction.cents
 
