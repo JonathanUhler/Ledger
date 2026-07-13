@@ -193,7 +193,7 @@ def convert_amount_to_cents(amount: str) -> int:
 
     The expected amount format is:
 
-      [-|+]?\$XXX,XXX,XXX.YY
+      [-|+]?\\$XXX,XXX,XXX.YY
 
     Where Xs are integers for the dollar portion of the amount and Ys are integers for the cents
     portion of the amount. Dollars and cents must be separated by a period, but the dollar sign
@@ -223,7 +223,7 @@ def convert_cents_to_amount(cents: int) -> str:
 
     The returned amount will be of the format:
 
-      [-|+]?\$XXXXXXXXX.YY
+      [-|+]?\\$XXXXXXXXX.YY
 
     See `convert_amount_to_cents` for more information about the format.
 
