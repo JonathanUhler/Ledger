@@ -1,6 +1,7 @@
 # Ledger
 
-A simple CLI- and TUI-based financial ledger for reconciling and storing bank-statement transactions.
+A simple CLI- and TUI-based financial ledger for reconciling and storing bank-statement
+transactions.
 
 ## Installation
 
@@ -44,8 +45,8 @@ upgrade: Migrate transaction data from older versions of the ledger app
 
 ## Data
 
-By default, all data used by the ledger application is created at `~/.ledger/`. This location can
-be overriden by setting the `LEDGER_HOME` environment variable to the preferred path.
+By default, all data used by the ledger application is created at `~/.ledger/`. This location can be
+overriden by setting the `LEDGER_HOME` environment variable to the preferred path.
 
 The following files are created when the ledger is used:
 
@@ -60,8 +61,8 @@ Statement grammar files describe how the ledger should parse the information in 
 extract the transaction details that are actually stored in the SQLite databases.
 
 Currently, only grammar files for CSV-based statements are supported. Arbitrary code execution is
-not allowed, so statement files must conform to some basic assumptions. A minimal grammar might
-look like this:
+not allowed, so statement files must conform to some basic assumptions. A minimal grammar might look
+like this:
 
 ```yaml
 name: wells_fargo_csv
