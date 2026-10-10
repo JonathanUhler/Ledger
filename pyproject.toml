@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ledger"
+version = "2.0.0"
+description = "A lean local financial ledger: reconcile, store, and analyze bank-statement transactions."
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.60",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+ledger = "ledger.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["ledger*"]
