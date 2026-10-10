@@ -13,11 +13,22 @@ from ledger.errors import LedgerError
 
 class CategoriesScreen(Vertical):
 
+    DEFAULT_CSS: str = """
+    CategoriesScreen #cat_buttons {
+        height: auto;
+        margin-top: 1;
+        margin-bottom: 1;
+    }
+    CategoriesScreen #cat_table {
+        height: 1fr;
+    }
+    """
+
     def compose(self) -> ComposeResult:
         yield Input(placeholder = "account", id = "cat_account")
         yield Input(placeholder = "new category (a/b/c)", id = "cat_name")
         yield Horizontal(Button("Load", id = "cat_load"), Button("Add", id = "cat_add"),
-                         Button("Add to all", id = "cat_addall"))
+                         Button("Add to all", id = "cat_addall"), id = "cat_buttons")
         yield DataTable(id = "cat_table")
         yield Label("", id = "cat_status")
 

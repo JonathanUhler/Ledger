@@ -2,7 +2,7 @@ import asyncio
 import datetime
 
 from textual.css.scalar import Unit
-from textual.widgets import DataTable, Input, ProgressBar, TabbedContent
+from textual.widgets import DataTable, Input, TabbedContent
 
 from ledger import config
 from ledger.core import search
@@ -83,14 +83,14 @@ def test_edit_button_updates_transaction() -> None:
     asyncio.run(scenario())
 
 
-def test_budgets_tab_lists_progress_bars() -> None:
+def test_budgets_tab_lists_in_table() -> None:
     ledger: Ledger = _seed_account()
     ledger.add_category("checking", "Income/Paychecks", recursive = True)
     ledger.add_transaction("checking", new_transaction(
         date = datetime.date(2026, 1, 5), cents = 2000000, statement_memo = "pay",
         account = "checking", category = "Income/Paychecks"))
-    ledger.add_budget(name = "Laptop", goal_cents = 100000, category = "Income/Paychecks",
-                      percent_bps = 500, start_date = datetime.date(2026, 1, 1))
+    budget = ledger.add_budget(name = "Laptop", goal_cents = 100000, category = "Income/Paychecks",
+                               percent_bps = 500, start_date = datetime.date(2026, 1, 1))
 
     async def scenario() -> None:
         app: LedgerApp = LedgerApp()
@@ -100,8 +100,35 @@ def test_budgets_tab_lists_progress_bars() -> None:
             await pilot.pause()
             await pilot.click("#budget_load")
             await pilot.pause()
-            bars = list(app.query(ProgressBar))
-            assert len(bars) == 1
+            table: DataTable = app.query_one("#budget_table", DataTable)
+            # A fractional height keeps the table from overflowing onto the buttons.
+            assert table.styles.height.unit == Unit.FRACTION
+            assert table.row_count == 1
+            row = table.get_row_at(0)
+            assert row[0] == budget.id              # id column
+            assert row[1] == "Laptop"               # name column
+            # 5% of $20,000 == $1,000 == goal -> met, so the budget is frozen at 100%.
+            assert "█" in row[2]                     # progress bar glyph
+            assert "100%" in row[2]
+            assert "FROZEN" in row[2]
+            assert "all accounts @ 5%" == row[3]    # account @ percentage column
+
+    asyncio.run(scenario())
+
+
+def test_categories_table_is_height_constrained() -> None:
+    _seed_account()
+
+    async def scenario() -> None:
+        app: LedgerApp = LedgerApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one(TabbedContent).active = "tab_categories"
+            await pilot.pause()
+            table: DataTable = app.query_one("#cat_table", DataTable)
+            # Matches the transactions table: a fractional height makes the table
+            # scroll internally instead of covering the buttons below it.
+            assert table.styles.height.unit == Unit.FRACTION
 
     asyncio.run(scenario())
 

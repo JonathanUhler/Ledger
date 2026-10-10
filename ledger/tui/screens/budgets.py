@@ -1,16 +1,31 @@
 """
-Budget management screen with a progress bar per budget.
+Budget management screen listing each budget in a table with an inline progress bar.
 """
 
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Input, Label, ProgressBar
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Button, DataTable, Input, Label
 
 from ledger.convert import convert_amount_to_cents, convert_bps_to_percent, \
     convert_cents_to_amount, convert_percent_to_bps
 from ledger.core.service import Ledger
 from ledger.errors import LedgerError
+from ledger.models import Budget, BudgetProgress
+
+
+_BAR_WIDTH: int = 10
+
+
+def _progress_cell(budget: Budget, progress: BudgetProgress) -> str:
+    pct: int = 0 if (budget.goal_cents == 0) \
+        else round(progress.saved_cents * 100 / budget.goal_cents)
+    clamped: int = max(0, min(100, pct))
+    filled: int = clamped // (100 // _BAR_WIDTH)
+    bar: str = ("█" * filled) + ("░" * (_BAR_WIDTH - filled))
+    marker: str = "FROZEN" if (progress.is_frozen) else "in progress"
+    return (f"{convert_cents_to_amount(progress.saved_cents)} / "
+            f"{convert_cents_to_amount(budget.goal_cents)} {bar} {pct}% {marker}")
 
 
 class BudgetsScreen(Vertical):
@@ -27,7 +42,7 @@ class BudgetsScreen(Vertical):
         margin-top: 1;
         margin-bottom: 1;
     }
-    BudgetsScreen #budget_list {
+    BudgetsScreen #budget_table {
         height: 1fr;
     }
     """
@@ -53,8 +68,13 @@ class BudgetsScreen(Vertical):
             Button("Edit", id = "budget_edit"), Button("Remove", id = "budget_remove"),
             id = "budget_buttons",
         )
-        yield VerticalScroll(id = "budget_list")
+        yield DataTable(id = "budget_table")
         yield Label("", id = "budget_status")
+
+    def on_mount(self) -> None:
+        table: DataTable = self.query_one("#budget_table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("id", "Name", "Progress", "Account")
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         ledger: Ledger = Ledger()
@@ -77,7 +97,7 @@ class BudgetsScreen(Vertical):
                                    **self._edit_fields())
             elif (event.button.id == "budget_remove"):
                 ledger.remove_budget(self.query_one("#budget_id", Input).value.strip())
-            await self._reload(ledger)
+            self._reload(ledger)
             status.update("OK")
         except LedgerError as error:
             status.update(f"error: {error}")
@@ -101,20 +121,16 @@ class BudgetsScreen(Vertical):
             fields["account"] = account
         return fields
 
-    async def _reload(self, ledger: Ledger) -> None:
-        container: VerticalScroll = self.query_one("#budget_list", VerticalScroll)
-        await container.remove_children()
+    def _reload(self, ledger: Ledger) -> None:
+        table: DataTable = self.query_one("#budget_table", DataTable)
+        table.clear()
         for budget in ledger.list_budgets():
-            progress = ledger.budget_progress(budget)
-            pct: int = 0 if (budget.goal_cents == 0) \
-                else max(0, min(100, round(progress.saved_cents * 100 / budget.goal_cents)))
-            marker: str = "FROZEN" if (progress.is_frozen) else "in progress"
-            text: str = (f"{budget.name} [{budget.id}] — "
-                         f"{convert_cents_to_amount(progress.saved_cents)} / "
-                         f"{convert_cents_to_amount(budget.goal_cents)} "
-                         f"({budget.category} @ {convert_bps_to_percent(budget.percent_bps)}) "
-                         f"{marker}")
-            await container.mount(Label(text))
-            bar: ProgressBar = ProgressBar(total = 100, show_eta = False)
-            await container.mount(bar)
-            bar.update(progress = pct)
+            progress: BudgetProgress = ledger.budget_progress(budget)
+            scope: str = budget.account if (budget.account) else "all accounts"
+            table.add_row(
+                budget.id,
+                budget.name,
+                _progress_cell(budget, progress),
+                f"{scope} @ {convert_bps_to_percent(budget.percent_bps)}",
+                key = budget.id,
+            )
