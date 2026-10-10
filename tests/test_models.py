@@ -42,21 +42,44 @@ def test_new_transaction_defaults() -> None:
 
 def test_new_budget_defaults() -> None:
     budget: models.Budget = models.new_budget(
-        name = "Laptop", goal_cents = 100000, category = "Income/Paychecks", percent_bps = 500,
-    )
+        name = "Laptop", goal_cents = 100000, category = "Income/Paychecks", )
     assert budget.kind is models.BudgetKind.ONE_TIME
     assert budget.account is None
     assert budget.start_date == datetime.date.today()
     assert budget.goal_cents == 100000
-    assert budget.percent_bps == 500
     assert len(budget.id) == 32
 
 
 def test_new_budget_explicit_fields() -> None:
     budget: models.Budget = models.new_budget(
-        name = "Car", goal_cents = 500000, category = "Income", percent_bps = 1000,
-        account = "checking", start_date = datetime.date(2026, 1, 1),
+        name = "Car", goal_cents = 500000, category = "Income", account = "checking", start_date = datetime.date(2026, 1, 1),
     )
     assert budget.account == "checking"
     assert budget.start_date == datetime.date(2026, 1, 1)
     assert models.BudgetKind("one_time") is models.BudgetKind.ONE_TIME
+
+
+def test_new_budget_has_priority_default() -> None:
+    budget: models.Budget = models.new_budget(
+        name = "Laptop", goal_cents = 100000, category = "Income/Paychecks", )
+    assert budget.priority == 0
+
+
+def test_new_budget_explicit_priority() -> None:
+    budget: models.Budget = models.new_budget(
+        name = "Car", goal_cents = 500000, category = "Income", priority = 3,
+    )
+    assert budget.priority == 3
+
+
+def test_category_cap_fields() -> None:
+    cap: models.CategoryCap = models.CategoryCap(category = "Income/Paychecks", draw_bps = 3000)
+    assert cap.category == "Income/Paychecks"
+    assert cap.draw_bps == 3000
+
+
+def test_new_budget_has_no_percent_bps() -> None:
+    budget: models.Budget = models.new_budget(
+        name = "Laptop", goal_cents = 100000, category = "Income/Paychecks",
+    )
+    assert not hasattr(budget, "percent_bps")

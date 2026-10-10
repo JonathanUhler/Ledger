@@ -81,7 +81,7 @@ class Budget:
     goal_cents: int
     category: str
     account: str | None
-    percent_bps: int
+    priority: int
     start_date: datetime.date
 
 
@@ -95,12 +95,18 @@ class BudgetProgress:
     is_frozen: bool
 
 
+@dataclass
+class CategoryCap:
+    category: str
+    draw_bps: int
+
+
 def new_budget(name: str,
                goal_cents: int,
                category: str,
-               percent_bps: int,
                account: str | None = None,
                start_date: datetime.date | None = None,
+               priority: int = 0,
                kind: BudgetKind = BudgetKind.ONE_TIME) -> Budget:
     return Budget(
         id = uuid.uuid4().hex,
@@ -109,6 +115,6 @@ def new_budget(name: str,
         goal_cents = goal_cents,
         category = category,
         account = account,
-        percent_bps = percent_bps,
+        priority = priority,
         start_date = start_date if (start_date is not None) else datetime.date.today(),
     )

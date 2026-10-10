@@ -129,7 +129,7 @@ def _seed_income(ledger: Ledger, account: str = "checking") -> None:
 def test_add_budget_persists_and_lists(ledger: Ledger) -> None:
     _seed_income(ledger)
     budget = ledger.add_budget(name = "Laptop", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500)
+                               category = "Income/Paychecks")
     listed = ledger.list_budgets()
     assert [b.id for b in listed] == [budget.id]
     assert listed[0].account is None
@@ -142,37 +142,25 @@ def test_list_budgets_empty_when_no_store(ledger: Ledger) -> None:
 def test_add_budget_rejects_bad_values(ledger: Ledger) -> None:
     _seed_income(ledger)
     with pytest.raises(InvalidBudgetError):
-        ledger.add_budget(name = "", goal_cents = 100000,
-                          category = "Income/Paychecks", percent_bps = 500)
+        ledger.add_budget(name = "", goal_cents = 100000, category = "Income/Paychecks")
     with pytest.raises(InvalidBudgetError):
-        ledger.add_budget(name = "X", goal_cents = 0,
-                          category = "Income/Paychecks", percent_bps = 500)
-    with pytest.raises(InvalidBudgetError):
-        ledger.add_budget(name = "X", goal_cents = 100000,
-                          category = "Income/Paychecks", percent_bps = 0)       # 0% rejected
-    with pytest.raises(InvalidBudgetError):
-        ledger.add_budget(name = "X", goal_cents = 100000,
-                          category = "Income/Paychecks", percent_bps = 10001)   # >100% rejected
-    assert ledger.add_budget(name = "X", goal_cents = 100000,
-                             category = "Income/Paychecks", percent_bps = 10000)   # 100% ok
+        ledger.add_budget(name = "X", goal_cents = 0, category = "Income/Paychecks")
 
 
 def test_add_budget_validates_category_and_account(ledger: Ledger) -> None:
     _seed_income(ledger)
     with pytest.raises(InvalidBudgetError):
         ledger.add_budget(name = "X", goal_cents = 100000,
-                          category = "Ghost", percent_bps = 500)                # unknown category
+                          category = "Ghost")                # unknown category
     with pytest.raises(InvalidBudgetError):
         ledger.add_budget(name = "X", goal_cents = 100000,
-                          category = "Income/Paychecks", percent_bps = 500,
-                          account = "savings")                                   # unknown account
+                          category = "Income/Paychecks", account = "savings")                                   # unknown account
 
 
 def test_edit_budget_clears_account_with_empty_string(ledger: Ledger) -> None:
     _seed_income(ledger)
     budget = ledger.add_budget(name = "Laptop", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500,
-                               account = "checking")
+                               category = "Income/Paychecks", account = "checking")
     ledger.edit_budget(budget.id, account = "")
     assert ledger.list_budgets()[0].account is None
 
@@ -186,7 +174,7 @@ def test_edit_unknown_budget_raises(ledger: Ledger) -> None:
 def test_remove_budget(ledger: Ledger) -> None:
     _seed_income(ledger)
     budget = ledger.add_budget(name = "Laptop", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500)
+                               category = "Income/Paychecks")
     ledger.remove_budget(budget.id)
     assert ledger.list_budgets() == []
     with pytest.raises(MissingBudgetError):
@@ -200,89 +188,155 @@ def _income(ledger: Ledger, account: str, day: int, cents: int,
         account = account, category = category))
 
 
-def test_progress_basic_percentage(ledger: Ledger) -> None:
-    _seed_income(ledger)
-    _income(ledger, "checking", 5, 1000000)                 # $10,000 income
-    budget = ledger.add_budget(name = "Laptop", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500,
-                               start_date = datetime.date(2026, 1, 1))
-    progress = ledger.budget_progress(budget)
-    assert progress.saved_cents == 50000                    # 5% of $10,000 = $500
-    assert progress.remaining_cents == 50000
-    assert progress.is_met is False
-    assert progress.is_frozen is False
-
-
-def test_progress_across_all_accounts_vs_scoped(ledger: Ledger) -> None:
-    _seed_income(ledger, "checking")
-    ledger.create_account("savings", "wells_fargo_csv")
-    ledger.add_category("savings", "Income/Paychecks", recursive = True)
-    _income(ledger, "checking", 5, 1000000)
-    _income(ledger, "savings", 5, 1000000)
-    all_budget = ledger.add_budget(name = "All", goal_cents = 1000000,
-                                   category = "Income/Paychecks", percent_bps = 500,
-                                   start_date = datetime.date(2026, 1, 1))
-    scoped = ledger.add_budget(name = "Scoped", goal_cents = 1000000,
-                               category = "Income/Paychecks", percent_bps = 500,
-                               account = "checking", start_date = datetime.date(2026, 1, 1))
-    assert ledger.budget_progress(all_budget).contributed_cents == 2000000     # both accounts
-    assert ledger.budget_progress(scoped).contributed_cents == 1000000         # checking only
-
-
-def test_progress_start_date_boundary(ledger: Ledger) -> None:
-    _seed_income(ledger)
-    _income(ledger, "checking", 1, 1000000)                 # exactly on start date -> counts
-    budget = ledger.add_budget(name = "B", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500,
-                               start_date = datetime.date(2026, 1, 1))
-    assert ledger.budget_progress(budget).contributed_cents == 1000000
-    ledger.edit_budget(budget.id, start_date = datetime.date(2026, 1, 2))   # now excludes day 1
-    assert ledger.budget_progress(ledger.list_budgets()[0]).contributed_cents == 0
-
-
-def test_progress_freezes_and_ignores_later_income(ledger: Ledger) -> None:
-    _seed_income(ledger)
-    _income(ledger, "checking", 5, 2000000)                 # 5% of $20,000 = $1,000 -> meets goal
-    budget = ledger.add_budget(name = "Laptop", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500,
-                               start_date = datetime.date(2026, 1, 1))
-    met = ledger.budget_progress(budget)
-    assert met.is_met is True and met.is_frozen is True and met.saved_cents == 100000
-    _income(ledger, "checking", 10, 2000000)                # more income, later
-    _income(ledger, "checking", 11, -5000000)               # and a big negative, later
-    frozen = ledger.budget_progress(ledger.list_budgets()[0])
-    assert frozen.saved_cents == 100000                     # unchanged by later activity
-
-
-def test_progress_overfunded_single_income(ledger: Ledger) -> None:
-    _seed_income(ledger)
-    _income(ledger, "checking", 5, 4000000)                 # 5% of $40,000 = $2,000 > $1,000 goal
-    budget = ledger.add_budget(name = "Laptop", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500,
-                               start_date = datetime.date(2026, 1, 1))
-    progress = ledger.budget_progress(budget)
-    assert progress.saved_cents == 200000
-    assert progress.remaining_cents == -100000
-    assert progress.is_met is True and progress.is_frozen is True
-
-
-def test_progress_net_negative_never_freezes(ledger: Ledger) -> None:
-    _seed_income(ledger)
-    _income(ledger, "checking", 5, -1000000)                # net-negative category
-    budget = ledger.add_budget(name = "Laptop", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500,
-                               start_date = datetime.date(2026, 1, 1))
-    progress = ledger.budget_progress(budget)
-    assert progress.saved_cents == -50000
-    assert progress.is_met is False and progress.is_frozen is False
-
-
 def test_progress_skips_missing_referenced_account(ledger: Ledger) -> None:
     _seed_income(ledger)
     budget = ledger.add_budget(name = "Laptop", goal_cents = 100000,
-                               category = "Income/Paychecks", percent_bps = 500,
-                               account = "checking", start_date = datetime.date(2026, 1, 1))
+                               category = "Income/Paychecks", account = "checking", start_date = datetime.date(2026, 1, 1))
     # simulate the referenced account being deleted out from under the budget
     config.account_db_path("checking").unlink()
     progress = ledger.budget_progress(ledger.list_budgets()[0])
     assert progress.contributed_cents == 0 and progress.saved_cents == 0
+
+
+def test_add_assigns_tail_priority(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 100000, category = "Income/Paychecks")
+    b = ledger.add_budget(name = "B", goal_cents = 100000, category = "Income/Paychecks")
+    by_id = {x.id: x.priority for x in ledger.list_budgets()}
+    assert by_id[a.id] == 0 and by_id[b.id] == 1
+
+
+def test_category_cap_service_crud_and_validation(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    assert ledger.get_category_cap("Income/Paychecks") == 10000          # default 100%
+    ledger.set_category_cap("Income/Paychecks", 3000)
+    assert ledger.get_category_cap("Income/Paychecks") == 3000
+    with pytest.raises(InvalidBudgetError):
+        ledger.set_category_cap("Income/Paychecks", 0)                    # 0% rejected
+    with pytest.raises(InvalidBudgetError):
+        ledger.set_category_cap("Income/Paychecks", 10001)                # >100% rejected
+    with pytest.raises(InvalidBudgetError):
+        ledger.set_category_cap("Ghost", 3000)                           # unknown category
+    ledger.clear_category_cap("Income/Paychecks")
+    assert ledger.get_category_cap("Income/Paychecks") == 10000
+
+
+def test_reorder_swaps_within_category(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 1, category = "Income/Paychecks")
+    b = ledger.add_budget(name = "B", goal_cents = 1, category = "Income/Paychecks")
+    ledger.reorder_budget(b.id, "up")
+    order = [x.name for x in ledger.list_budgets() if x.category == "Income/Paychecks"]
+    assert order == ["B", "A"]
+
+
+def test_reorder_boundary_is_noop(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 1, category = "Income/Paychecks")
+    b = ledger.add_budget(name = "B", goal_cents = 1, category = "Income/Paychecks")
+    ledger.reorder_budget(a.id, "up")      # already at top
+    ledger.reorder_budget(b.id, "down")    # already at bottom
+    order = [x.name for x in ledger.list_budgets() if x.category == "Income/Paychecks"]
+    assert order == ["A", "B"]
+    with pytest.raises(InvalidBudgetError):
+        ledger.reorder_budget(a.id, "sideways")
+    with pytest.raises(MissingBudgetError):
+        ledger.reorder_budget("nope", "up")
+
+
+def test_edit_category_requeues_at_tail(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    ledger.add_category("checking", "Income/Bonus", recursive = True)
+    ledger.add_budget(name = "A", goal_cents = 1, category = "Income/Bonus")
+    moved = ledger.add_budget(name = "B", goal_cents = 1, category = "Income/Paychecks")
+    ledger.edit_budget(moved.id, category = "Income/Bonus")
+    bonus = [x for x in ledger.list_budgets() if x.category == "Income/Bonus"]
+    assert {x.name: x.priority for x in bonus} == {"A": 0, "B": 1}
+
+
+def test_group_fills_sequentially_by_priority(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 30000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    b = ledger.add_budget(name = "B", goal_cents = 20000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    ledger.set_category_cap("Income/Paychecks", 10000)          # 100%
+    _income(ledger, "checking", 5, 30000)                       # first $300 -> A fills, freezes
+    assert ledger.budget_progress(a).is_frozen is True
+    assert ledger.budget_progress(b).saved_cents == 0           # B not started yet
+    _income(ledger, "checking", 6, 20000)                       # next $200 -> B fills
+    assert ledger.budget_progress(b).is_met is True
+
+
+def test_group_overfunded_cascades_within_cap(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 30000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    b = ledger.add_budget(name = "B", goal_cents = 20000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    ledger.set_category_cap("Income/Paychecks", 5000)           # 50%
+    _income(ledger, "checking", 5, 100000)                      # $1000 income, pool = $500
+    # pool $500: A takes $300 (freezes), cascades $200 to B (fills). Combined $500 == cap.
+    assert ledger.budget_progress(a).saved_cents == 30000
+    assert ledger.budget_progress(b).saved_cents == 20000
+
+
+def test_group_cap_limits_combined_draw(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 1000000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    ledger.set_category_cap("Income/Paychecks", 3000)           # 30%
+    _income(ledger, "checking", 5, 100000)                      # $1000 -> at most $300 drawn
+    assert ledger.budget_progress(a).saved_cents == 30000
+
+
+def test_group_mixed_scope_shares_one_queue(ledger: Ledger) -> None:
+    _seed_income(ledger, "checking")
+    allb = ledger.add_budget(name = "All", goal_cents = 20000, category = "Income/Paychecks",
+                             start_date = datetime.date(2026, 1, 1))
+    chk = ledger.add_budget(name = "Chk", goal_cents = 20000, category = "Income/Paychecks",
+                            account = "checking",
+                            start_date = datetime.date(2026, 1, 1))
+    ledger.set_category_cap("Income/Paychecks", 5000)           # 50%
+    _income(ledger, "checking", 5, 100000)                      # $1000 checking, pool $500
+    # priority order: All (0) then Chk (1). All takes $200 (freezes), Chk takes $200. Combined $400 <= $500.
+    assert ledger.budget_progress(allb).saved_cents == 20000
+    assert ledger.budget_progress(chk).saved_cents == 20000
+
+
+def test_group_net_negative_reduces_first_active_only(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 100000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    b = ledger.add_budget(name = "B", goal_cents = 100000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    ledger.set_category_cap("Income/Paychecks", 10000)
+    _income(ledger, "checking", 5, -50000)                      # -$500, pool -$500 -> A only
+    assert ledger.budget_progress(a).saved_cents == -50000
+    assert ledger.budget_progress(a).is_frozen is False
+    assert ledger.budget_progress(b).saved_cents == 0
+
+
+def test_group_frozen_is_immutable(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 30000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    b = ledger.add_budget(name = "B", goal_cents = 1000000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 1))
+    ledger.set_category_cap("Income/Paychecks", 10000)
+    _income(ledger, "checking", 5, 30000)                       # A freezes exactly
+    _income(ledger, "checking", 6, 30000)                       # later income -> cascades to B only
+    _income(ledger, "checking", 7, -100000)                     # later negative -> B only
+    assert ledger.budget_progress(a).saved_cents == 30000       # A unchanged after freeze
+    assert ledger.budget_progress(a).is_frozen is True
+
+
+def test_group_start_date_eligibility(ledger: Ledger) -> None:
+    _seed_income(ledger)
+    a = ledger.add_budget(name = "A", goal_cents = 1000000, category = "Income/Paychecks",
+                          start_date = datetime.date(2026, 1, 10))
+    ledger.set_category_cap("Income/Paychecks", 10000)
+    _income(ledger, "checking", 5, 100000)                      # before A's start -> ignored
+    assert ledger.budget_progress(a).saved_cents == 0
+    _income(ledger, "checking", 10, 100000)                     # on/after start -> counts
+    assert ledger.budget_progress(a).saved_cents == 100000

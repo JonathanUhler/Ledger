@@ -199,8 +199,7 @@ def cmd_upgrade(_ledger: Ledger, args: Namespace) -> int:
 
 def cmd_budget_add(ledger: Ledger, args: Namespace) -> int:
     budget = ledger.add_budget(name = args.name, goal_cents = args.goal, category = args.category,
-                               percent_bps = args.percent, start_date = args.start,
-                               account = args.account)
+                               start_date = args.start, account = args.account)
     print(f"Added budget {budget.id}")
     return 0
 
@@ -213,8 +212,6 @@ def cmd_budget_edit(ledger: Ledger, args: Namespace) -> int:
         fields["goal_cents"] = args.goal
     if (args.category is not None):
         fields["category"] = args.category
-    if (args.percent is not None):
-        fields["percent_bps"] = args.percent
     if (args.account is not None):
         fields["account"] = args.account
     if (args.start is not None):
@@ -235,22 +232,42 @@ def cmd_budget_view(ledger: Ledger, args: Namespace) -> int:
     if (len(budgets) == 0):
         print("No budgets")
         return 0
+    by_category: dict[str, list] = {}
     for budget in budgets:
-        progress = ledger.budget_progress(budget)
-        scope: str = budget.account if (budget.account) else "all accounts"
-        status: str = "FROZEN" if (progress.is_frozen) \
-            else ("MET" if (progress.is_met) else "in progress")
-        pct: int = 0 if (budget.goal_cents == 0) \
-            else round(progress.saved_cents * 100 / budget.goal_cents)
-        print(f"Budget: {budget.name}  [{budget.id}]")
-        print(f"  Status:    {status}")
-        print(f"  Goal:      {convert_cents_to_amount(budget.goal_cents)}")
-        print(f"  Saved:     {convert_cents_to_amount(progress.saved_cents)} ({pct}%)")
-        print(f"  Remaining: {convert_cents_to_amount(progress.remaining_cents)}")
-        print(f"  Income:    {budget.category} @ {convert_bps_to_percent(budget.percent_bps)} "
-              f"({scope})")
-        print(f"  Since:     {convert_date_to_string(budget.start_date)}")
+        by_category.setdefault(budget.category, []).append(budget)
+    for category in sorted(by_category):
+        cap_bps: int = ledger.get_category_cap(category)
+        print(f"{category} — cap {convert_bps_to_percent(cap_bps)}")
+        for position, budget in enumerate(by_category[category], start = 1):
+            progress = ledger.budget_progress(budget)
+            scope: str = budget.account if (budget.account) else "all accounts"
+            status: str = "FROZEN" if (progress.is_frozen) \
+                else ("MET" if (progress.is_met) else "in progress")
+            pct: int = 0 if (budget.goal_cents == 0) \
+                else round(progress.saved_cents * 100 / budget.goal_cents)
+            print(f"  {position}. {budget.name}  [{budget.id}]  {status}")
+            print(f"       {convert_cents_to_amount(progress.saved_cents)} / "
+                  f"{convert_cents_to_amount(budget.goal_cents)} ({pct}%)  "
+                  f"remaining {convert_cents_to_amount(progress.remaining_cents)}  ({scope})")
         print()
+    return 0
+
+
+def cmd_budget_move(ledger: Ledger, args: Namespace) -> int:
+    ledger.reorder_budget(args.id, args.direction)
+    print(f"Moved budget {args.id} {args.direction}")
+    return 0
+
+
+def cmd_budget_setcap(ledger: Ledger, args: Namespace) -> int:
+    ledger.set_category_cap(args.category, args.percent)
+    print(f"Set cap for {args.category}")
+    return 0
+
+
+def cmd_budget_clearcap(ledger: Ledger, args: Namespace) -> int:
+    ledger.clear_category_cap(args.category)
+    print(f"Cleared cap for {args.category}")
     return 0
 
 
@@ -360,7 +377,6 @@ def build_parser() -> ArgumentParser:
     budget_add.add_argument("name")
     budget_add.add_argument("--goal", type = convert_amount_to_cents, required = True)
     budget_add.add_argument("--category", required = True)
-    budget_add.add_argument("--percent", type = convert_percent_to_bps, required = True)
     budget_add.add_argument("--account", default = None)
     budget_add.add_argument("--start", type = convert_string_to_date, default = None,
                             metavar = "YYYY-MM-DD")
@@ -370,7 +386,6 @@ def build_parser() -> ArgumentParser:
     budget_edit.add_argument("--name", default = None)
     budget_edit.add_argument("--goal", type = convert_amount_to_cents, default = None)
     budget_edit.add_argument("--category", default = None)
-    budget_edit.add_argument("--percent", type = convert_percent_to_bps, default = None)
     budget_edit.add_argument("--account", default = None)
     budget_edit.add_argument("--start", type = convert_string_to_date, default = None,
                              metavar = "YYYY-MM-DD")
@@ -380,6 +395,17 @@ def build_parser() -> ArgumentParser:
     budget_remove.set_defaults(handler = cmd_budget_remove)
     budget_view = budget_sub.add_parser("view")
     budget_view.set_defaults(handler = cmd_budget_view)
+    budget_move = budget_sub.add_parser("move")
+    budget_move.add_argument("id")
+    budget_move.add_argument("direction", choices = ["up", "down"])
+    budget_move.set_defaults(handler = cmd_budget_move)
+    budget_setcap = budget_sub.add_parser("setcap")
+    budget_setcap.add_argument("category")
+    budget_setcap.add_argument("percent", type = convert_percent_to_bps)
+    budget_setcap.set_defaults(handler = cmd_budget_setcap)
+    budget_clearcap = budget_sub.add_parser("clearcap")
+    budget_clearcap.add_argument("category")
+    budget_clearcap.set_defaults(handler = cmd_budget_clearcap)
 
     upgrade_parser = commands.add_parser("upgrade", help = "upgrade v1 accounts to v2")
     upgrade_parser.add_argument("account", nargs = "*", default = [])

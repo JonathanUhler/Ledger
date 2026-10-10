@@ -64,22 +64,22 @@ def _make_account_with_income() -> None:
 
 def test_budget_add_and_view(capsys: pytest.CaptureFixture) -> None:
     _make_account_with_income()
-    assert app.main(["budget", "add", "Laptop", "--goal", "1000.00",
-                     "--category", "Income/Paychecks", "--percent", "5",
-                     "--start", "2026-01-01"]) == 0
+    assert app.main(["budget", "add", "Laptop", "--goal", "300.00",
+                     "--category", "Income/Paychecks", "--start", "2026-01-01"]) == 0
+    assert app.main(["budget", "setcap", "Income/Paychecks", "50"]) == 0
     capsys.readouterr()
     assert app.main(["budget", "view"]) == 0
     out: str = capsys.readouterr().out
+    assert "Income/Paychecks" in out
+    assert "cap 50%" in out
     assert "Laptop" in out
-    assert "$1000.00" in out       # goal
-    assert "5%" in out             # percentage rate
-    assert "FROZEN" in out         # 5% of $20,000 == $1,000 -> met
+    assert "$300.00" in out
 
 
 def test_budget_edit_and_remove(capsys: pytest.CaptureFixture) -> None:
     _make_account_with_income()
     app.main(["budget", "add", "Laptop", "--goal", "1000.00",
-              "--category", "Income/Paychecks", "--percent", "5", "--start", "2026-01-01"])
+              "--category", "Income/Paychecks", "--start", "2026-01-01"])
     budget_id: str = Ledger().list_budgets()[0].id
     assert app.main(["budget", "edit", budget_id, "--name", "Gaming PC"]) == 0
     assert Ledger().list_budgets()[0].name == "Gaming PC"
@@ -92,10 +92,33 @@ def test_budget_view_empty(capsys: pytest.CaptureFixture) -> None:
     assert "No budgets" in capsys.readouterr().out
 
 
-def test_budget_add_bad_percent_returns_error() -> None:
+def test_budget_add_rejects_percent_flag() -> None:
     _make_account_with_income()
-    assert app.main(["budget", "add", "Laptop", "--goal", "1000.00",
-                     "--category", "Income/Paychecks", "--percent", "nonsense"]) == 1
+    # --percent is no longer a recognised option -> argparse error -> exit 1
+    assert app.main(["budget", "add", "Laptop", "--goal", "300.00",
+                     "--category", "Income/Paychecks", "--percent", "5"]) == 1
+
+
+def test_budget_move_reorders(capsys: pytest.CaptureFixture) -> None:
+    _make_account_with_income()
+    app.main(["budget", "add", "A", "--goal", "100.00", "--category", "Income/Paychecks"])
+    app.main(["budget", "add", "B", "--goal", "100.00", "--category", "Income/Paychecks"])
+    second_id: str = Ledger().list_budgets()[1].id
+    assert app.main(["budget", "move", second_id, "up"]) == 0
+    assert Ledger().list_budgets()[0].id == second_id
+
+
+def test_budget_setcap_and_clearcap() -> None:
+    _make_account_with_income()
+    assert app.main(["budget", "setcap", "Income/Paychecks", "30"]) == 0
+    assert Ledger().get_category_cap("Income/Paychecks") == 3000
+    assert app.main(["budget", "clearcap", "Income/Paychecks"]) == 0
+    assert Ledger().get_category_cap("Income/Paychecks") == 10000
+
+
+def test_budget_setcap_bad_value_returns_error() -> None:
+    _make_account_with_income()
+    assert app.main(["budget", "setcap", "Income/Paychecks", "150"]) == 1   # >100%
 
 
 def test_budget_edit_unknown_id_returns_error() -> None:

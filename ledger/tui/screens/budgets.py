@@ -1,5 +1,6 @@
 """
-Budget management screen listing each budget in a table with an inline progress bar.
+Budget management screen: a table of budgets grouped by category with inline progress bars,
+per-category draw caps, and priority reordering.
 """
 
 
@@ -37,9 +38,13 @@ class BudgetsScreen(Vertical):
     BudgetsScreen .budget_row Input {
         width: 1fr;
     }
-    BudgetsScreen #budget_buttons {
+    BudgetsScreen .budget_buttons {
         height: auto;
+    }
+    BudgetsScreen #budget_buttons {
         margin-top: 1;
+    }
+    BudgetsScreen #budget_buttons2 {
         margin-bottom: 1;
     }
     BudgetsScreen #budget_table {
@@ -55,18 +60,23 @@ class BudgetsScreen(Vertical):
         )
         yield Horizontal(
             Input(placeholder = "income category (a/b)", id = "budget_category"),
-            Input(placeholder = "percent (e.g. 5)", id = "budget_percent"),
+            Input(placeholder = "account (blank = all accounts)", id = "budget_account"),
             classes = "budget_row",
         )
         yield Horizontal(
-            Input(placeholder = "account (blank = all accounts)", id = "budget_account"),
             Input(placeholder = "id (for edit / remove)", id = "budget_id"),
+            Input(placeholder = "cap % for category (e.g. 30)", id = "budget_cap"),
             classes = "budget_row",
         )
         yield Horizontal(
             Button("Load", id = "budget_load"), Button("Add", id = "budget_add"),
             Button("Edit", id = "budget_edit"), Button("Remove", id = "budget_remove"),
-            id = "budget_buttons",
+            id = "budget_buttons", classes = "budget_buttons",
+        )
+        yield Horizontal(
+            Button("Up", id = "budget_up"), Button("Down", id = "budget_down"),
+            Button("Set Cap", id = "budget_setcap"), Button("Clear Cap", id = "budget_clearcap"),
+            id = "budget_buttons2", classes = "budget_buttons",
         )
         yield DataTable(id = "budget_table")
         yield Label("", id = "budget_status")
@@ -74,7 +84,14 @@ class BudgetsScreen(Vertical):
     def on_mount(self) -> None:
         table: DataTable = self.query_one("#budget_table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("id", "Name", "Progress", "Account")
+        table.add_columns("id", "#", "Name", "Progress", "Account", "Category @ cap")
+
+    def _selected_id(self) -> str | None:
+        table: DataTable = self.query_one("#budget_table", DataTable)
+        if (table.row_count == 0):
+            return None
+        cell_key = table.coordinate_to_cell_key(table.cursor_coordinate)
+        return cell_key.row_key.value
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         ledger: Ledger = Ledger()
@@ -87,8 +104,6 @@ class BudgetsScreen(Vertical):
                     goal_cents = convert_amount_to_cents(
                         self.query_one("#budget_goal", Input).value),
                     category = self.query_one("#budget_category", Input).value.strip(),
-                    percent_bps = convert_percent_to_bps(
-                        self.query_one("#budget_percent", Input).value),
                     start_date = None,
                     account = account if (account != "") else None,
                 )
@@ -97,6 +112,20 @@ class BudgetsScreen(Vertical):
                                    **self._edit_fields())
             elif (event.button.id == "budget_remove"):
                 ledger.remove_budget(self.query_one("#budget_id", Input).value.strip())
+            elif (event.button.id in ("budget_up", "budget_down")):
+                selected: str | None = self._selected_id()
+                if (selected is None):
+                    status.update("Load budgets and select a row first")
+                    return
+                ledger.reorder_budget(selected,
+                                      "up" if (event.button.id == "budget_up") else "down")
+            elif (event.button.id == "budget_setcap"):
+                ledger.set_category_cap(
+                    self.query_one("#budget_category", Input).value.strip(),
+                    convert_percent_to_bps(self.query_one("#budget_cap", Input).value))
+            elif (event.button.id == "budget_clearcap"):
+                ledger.clear_category_cap(
+                    self.query_one("#budget_category", Input).value.strip())
             self._reload(ledger)
             status.update("OK")
         except LedgerError as error:
@@ -107,7 +136,6 @@ class BudgetsScreen(Vertical):
         name: str = self.query_one("#budget_name", Input).value.strip()
         goal: str = self.query_one("#budget_goal", Input).value.strip()
         category: str = self.query_one("#budget_category", Input).value.strip()
-        percent: str = self.query_one("#budget_percent", Input).value.strip()
         account: str = self.query_one("#budget_account", Input).value.strip()
         if (name != ""):
             fields["name"] = name
@@ -115,8 +143,6 @@ class BudgetsScreen(Vertical):
             fields["goal_cents"] = convert_amount_to_cents(goal)
         if (category != ""):
             fields["category"] = category
-        if (percent != ""):
-            fields["percent_bps"] = convert_percent_to_bps(percent)
         if (account != ""):
             fields["account"] = account
         return fields
@@ -124,13 +150,22 @@ class BudgetsScreen(Vertical):
     def _reload(self, ledger: Ledger) -> None:
         table: DataTable = self.query_one("#budget_table", DataTable)
         table.clear()
-        for budget in ledger.list_budgets():
+        position: int = 0
+        current_category: str | None = None
+        for budget in ledger.list_budgets():          # already ordered (category, priority, id)
+            if (budget.category != current_category):
+                current_category = budget.category
+                position = 0
+            position += 1
             progress: BudgetProgress = ledger.budget_progress(budget)
             scope: str = budget.account if (budget.account) else "all accounts"
+            cap: str = convert_bps_to_percent(ledger.get_category_cap(budget.category))
             table.add_row(
                 budget.id,
+                str(position),
                 budget.name,
                 _progress_cell(budget, progress),
-                f"{scope} @ {convert_bps_to_percent(budget.percent_bps)}",
+                scope,
+                f"{budget.category} @ {cap}",
                 key = budget.id,
             )

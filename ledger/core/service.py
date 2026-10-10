@@ -10,10 +10,10 @@ from ledger.core import reconcile as reconcile_module
 from ledger.core import search as search_module
 from ledger.core.account import Account
 from ledger.core.budget_store import BudgetStore
-from ledger.convert import round_half_up, convert_date_to_string
+from ledger.convert import round_half_up
 from ledger.errors import InvalidCategoryError, InvalidBudgetError
-from ledger.models import AccountSummary, Budget, BudgetKind, BudgetProgress, Transaction, \
-    compute_content_hash, new_budget, new_transaction
+from ledger.models import AccountSummary, Budget, BudgetProgress, CategoryCap, \
+    Transaction, compute_content_hash, new_budget, new_transaction
 from ledger.statements import csv_grammar, grammar
 
 
@@ -211,14 +211,12 @@ class Ledger:
         finally:
             store.close()
 
-    def _validate_budget(self, name: str, goal_cents: int, category: str, percent_bps: int,
+    def _validate_budget(self, name: str, goal_cents: int, category: str,
                          account: str | None) -> None:
         if (name.strip() == ""):
             raise InvalidBudgetError("budget name must not be empty")
         if (goal_cents <= 0):
             raise InvalidBudgetError("budget goal must be a positive amount")
-        if (not (0 < percent_bps <= 10000)):
-            raise InvalidBudgetError("budget percentage must be greater than 0% and at most 100%")
         if (account is not None and account != ""):
             if (account not in self.all_account_names()):
                 raise InvalidBudgetError(f"account '{account}' does not exist")
@@ -231,15 +229,18 @@ class Ledger:
                 return
         raise InvalidBudgetError(f"category '{category}' does not exist in any account")
 
-    def add_budget(self, name: str, goal_cents: int, category: str, percent_bps: int,
+    def add_budget(self, name: str, goal_cents: int, category: str,
                    start_date: datetime.date | None = None, account: str | None = None) -> Budget:
         account = account if (account) else None
-        self._validate_budget(name, goal_cents, category, percent_bps, account)
-        budget: Budget = new_budget(name = name, goal_cents = goal_cents, category = category,
-                                    percent_bps = percent_bps, account = account,
-                                    start_date = start_date)
+        self._validate_budget(name, goal_cents, category, account)
         store: BudgetStore = BudgetStore.open()
         try:
+            existing: list[int] = [b.priority for b in store.list_budgets()
+                                   if (b.category == category)]
+            priority: int = (max(existing) + 1) if (existing) else 0
+            budget: Budget = new_budget(name = name, goal_cents = goal_cents, category = category,
+                                        account = account, start_date = start_date,
+                                        priority = priority)
             store.add_budget(budget)
         finally:
             store.close()
@@ -252,13 +253,16 @@ class Ledger:
             name = str(fields.get("name", current.name))
             goal_cents = int(fields.get("goal_cents", current.goal_cents))
             category = str(fields.get("category", current.category))
-            percent_bps = int(fields.get("percent_bps", current.percent_bps))
             raw_account = fields.get("account", current.account)
             account = str(raw_account) if (raw_account) else None
-            self._validate_budget(name, goal_cents, category, percent_bps, account)
+            self._validate_budget(name, goal_cents, category, account)
             apply_fields: dict[str, object] = dict(fields)
             if ("account" in apply_fields):
                 apply_fields["account"] = account
+            if (category != current.category):
+                existing: list[int] = [b.priority for b in store.list_budgets()
+                                       if (b.category == category)]
+                apply_fields["priority"] = (max(existing) + 1) if (existing) else 0
             return store.edit_budget(budget_id, **apply_fields)
         finally:
             store.close()
@@ -270,37 +274,123 @@ class Ledger:
         finally:
             store.close()
 
-    def budget_progress(self, budget: Budget) -> BudgetProgress:
-        if (budget.account):
-            names: list[str] = [budget.account] if (budget.account in self.all_account_names()) \
-                else []
-        else:
-            names = self.all_account_names()
+    def get_category_cap(self, category: str) -> int:
+        store: BudgetStore = BudgetStore.open()
+        try:
+            stored: int | None = store.get_cap(category)
+        finally:
+            store.close()
+        return stored if (stored is not None) else 10000
 
+    def set_category_cap(self, category: str, draw_bps: int) -> None:
+        if (not (0 < draw_bps <= 10000)):
+            raise InvalidBudgetError("cap must be greater than 0% and at most 100%")
+        found: bool = any(category in self.list_categories(name)
+                          for name in self.all_account_names())
+        if (not found):
+            raise InvalidBudgetError(f"category '{category}' does not exist in any account")
+        store: BudgetStore = BudgetStore.open()
+        try:
+            store.set_cap(category, draw_bps)
+        finally:
+            store.close()
+
+    def clear_category_cap(self, category: str) -> None:
+        store: BudgetStore = BudgetStore.open()
+        try:
+            store.clear_cap(category)
+        finally:
+            store.close()
+
+    def list_category_caps(self) -> list[CategoryCap]:
+        store: BudgetStore = BudgetStore.open()
+        try:
+            return store.list_caps()
+        finally:
+            store.close()
+
+    def reorder_budget(self, budget_id: str, direction: str) -> None:
+        if (direction not in ("up", "down")):
+            raise InvalidBudgetError(f"direction must be 'up' or 'down', not '{direction}'")
+        store: BudgetStore = BudgetStore.open()
+        try:
+            target: Budget = store.get_budget(budget_id)
+            siblings: list[Budget] = [b for b in store.list_budgets()
+                                      if (b.category == target.category)]
+            siblings.sort(key = lambda b: (b.priority, b.id))
+            index: int = next(i for i, b in enumerate(siblings) if (b.id == target.id))
+            swap: int = index - 1 if (direction == "up") else index + 1
+            if (swap < 0 or swap >= len(siblings)):
+                return
+            other: Budget = siblings[swap]
+            store.set_priority(target.id, other.priority)
+            store.set_priority(other.id, target.priority)
+        finally:
+            store.close()
+
+    def _allocate_category(self, category: str
+                           ) -> tuple[dict[str, int], dict[str, int], dict[str, bool]]:
+        store: BudgetStore = BudgetStore.open()
+        try:
+            budgets: list[Budget] = [b for b in store.list_budgets() if (b.category == category)]
+            cap_stored: int | None = store.get_cap(category)
+        finally:
+            store.close()
+        cap_bps: int = cap_stored if (cap_stored is not None) else 10000
+        budgets.sort(key = lambda b: (b.priority, b.id))
+        if (len(budgets) == 0):
+            return {}, {}, {}
+
+        earliest: datetime.date = min(b.start_date for b in budgets)
         contributions: list[Transaction] = []
-        for name in names:
+        for name in self.all_account_names():
             acct: Account = Account.open(name)
             try:
-                contributions += acct.list_category_since(budget.category, budget.start_date)
+                contributions += acct.list_category_since(category, earliest)
             finally:
                 acct.close()
-        contributions.sort(key = lambda txn: (convert_date_to_string(txn.date), txn.id))
+        contributions.sort(key = lambda txn: (txn.date, txn.id))
 
-        contributed: int = 0
-        saved: int = 0
-        frozen: bool = False
+        saved: dict[str, int] = {b.id: 0 for b in budgets}
+        seen: dict[str, int] = {b.id: 0 for b in budgets}
+        frozen: dict[str, bool] = {b.id: False for b in budgets}
+
         for txn in contributions:
-            contributed += txn.cents
-            saved = round_half_up(budget.percent_bps * contributed, 10000)
-            if (budget.kind is BudgetKind.ONE_TIME and saved >= budget.goal_cents):
-                frozen = True
-                break
+            pool: int = round_half_up(cap_bps * txn.cents, 10000)
+            eligible: list[Budget] = [
+                b for b in budgets
+                if (not frozen[b.id]
+                    and (b.account is None or b.account == txn.account)
+                    and txn.date >= b.start_date)
+            ]
+            for b in eligible:
+                seen[b.id] += txn.cents
+            if (pool >= 0):
+                remaining: int = pool
+                for b in eligible:
+                    if (remaining <= 0):
+                        break
+                    need: int = b.goal_cents - saved[b.id]
+                    if (need <= 0):
+                        frozen[b.id] = True
+                        continue
+                    take: int = min(remaining, need)
+                    saved[b.id] += take
+                    remaining -= take
+                    if (saved[b.id] >= b.goal_cents):
+                        frozen[b.id] = True
+            elif (len(eligible) > 0):
+                saved[eligible[0].id] += pool
+        return saved, seen, frozen
 
+    def budget_progress(self, budget: Budget) -> BudgetProgress:
+        saved, seen, frozen = self._allocate_category(budget.category)
+        amount: int = saved.get(budget.id, 0)
         return BudgetProgress(
-            saved_cents = saved,
+            saved_cents = amount,
             goal_cents = budget.goal_cents,
-            remaining_cents = budget.goal_cents - saved,
-            contributed_cents = contributed,
-            is_met = saved >= budget.goal_cents,
-            is_frozen = frozen,
+            remaining_cents = budget.goal_cents - amount,
+            contributed_cents = seen.get(budget.id, 0),
+            is_met = amount >= budget.goal_cents,
+            is_frozen = frozen.get(budget.id, False),
         )

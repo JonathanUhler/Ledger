@@ -90,7 +90,7 @@ def test_budgets_tab_lists_in_table() -> None:
         date = datetime.date(2026, 1, 5), cents = 2000000, statement_memo = "pay",
         account = "checking", category = "Income/Paychecks"))
     budget = ledger.add_budget(name = "Laptop", goal_cents = 100000, category = "Income/Paychecks",
-                               percent_bps = 500, start_date = datetime.date(2026, 1, 1))
+                               start_date = datetime.date(2026, 1, 1))
 
     async def scenario() -> None:
         app: LedgerApp = LedgerApp()
@@ -105,13 +105,15 @@ def test_budgets_tab_lists_in_table() -> None:
             assert table.styles.height.unit == Unit.FRACTION
             assert table.row_count == 1
             row = table.get_row_at(0)
-            assert row[0] == budget.id              # id column
-            assert row[1] == "Laptop"               # name column
-            # 5% of $20,000 == $1,000 == goal -> met, so the budget is frozen at 100%.
-            assert "█" in row[2]                     # progress bar glyph
-            assert "100%" in row[2]
-            assert "FROZEN" in row[2]
-            assert "all accounts @ 5%" == row[3]    # account @ percentage column
+            assert row[0] == budget.id                   # id
+            assert row[1] == "1"                         # order within category
+            assert row[2] == "Laptop"                    # name
+            # default cap 100% -> $20,000 income fills the $1,000 goal; frozen at 100%.
+            assert "█" in row[3]                          # progress bar glyph
+            assert "100%" in row[3]
+            assert "FROZEN" in row[3]
+            assert row[4] == "all accounts"              # account scope
+            assert row[5] == "Income/Paychecks @ 100%"   # category @ cap (default)
 
     asyncio.run(scenario())
 
@@ -146,9 +148,55 @@ def test_budgets_tab_add_button_creates_budget() -> None:
             app.query_one("#budget_name", Input).value = "Laptop"
             app.query_one("#budget_goal", Input).value = "1000.00"
             app.query_one("#budget_category", Input).value = "Income/Paychecks"
-            app.query_one("#budget_percent", Input).value = "5"
             await pilot.click("#budget_add")
             await pilot.pause()
             assert [b.name for b in ledger.list_budgets()] == ["Laptop"]
+
+    asyncio.run(scenario())
+
+
+def test_budgets_tab_set_cap_button() -> None:
+    ledger: Ledger = _seed_account()
+    ledger.add_category("checking", "Income/Paychecks", recursive = True)
+    ledger.add_budget(name = "Laptop", goal_cents = 100000, category = "Income/Paychecks",
+                      start_date = datetime.date(2026, 1, 1))
+
+    async def scenario() -> None:
+        app: LedgerApp = LedgerApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one(TabbedContent).active = "tab_budgets"
+            await pilot.pause()
+            app.query_one("#budget_category", Input).value = "Income/Paychecks"
+            app.query_one("#budget_cap", Input).value = "30"
+            await pilot.click("#budget_setcap")
+            await pilot.pause()
+            assert ledger.get_category_cap("Income/Paychecks") == 3000
+            table: DataTable = app.query_one("#budget_table", DataTable)
+            assert table.get_row_at(0)[5] == "Income/Paychecks @ 30%"
+
+    asyncio.run(scenario())
+
+
+def test_budgets_tab_reorder_selected_row() -> None:
+    ledger: Ledger = _seed_account()
+    ledger.add_category("checking", "Income/Paychecks", recursive = True)
+    ledger.add_budget(name = "A", goal_cents = 100000, category = "Income/Paychecks")
+    ledger.add_budget(name = "B", goal_cents = 100000, category = "Income/Paychecks")
+
+    async def scenario() -> None:
+        app: LedgerApp = LedgerApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one(TabbedContent).active = "tab_budgets"
+            await pilot.pause()
+            await pilot.click("#budget_load")
+            await pilot.pause()
+            table: DataTable = app.query_one("#budget_table", DataTable)
+            table.move_cursor(row = 1)                 # select "B" (second row)
+            await pilot.click("#budget_up")
+            await pilot.pause()
+            assert [b.name for b in ledger.list_budgets()] == ["B", "A"]
+            assert table.get_row_at(0)[2] == "B"
 
     asyncio.run(scenario())
