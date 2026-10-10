@@ -2,6 +2,7 @@ import pytest
 
 from ledger import config
 from ledger.cli import app
+from ledger.core.service import Ledger
 
 
 WELLS_YAML: str = (
@@ -50,3 +51,53 @@ def test_missing_account_returns_error(capsys: pytest.CaptureFixture) -> None:
 
 def test_no_subcommand_prints_usage() -> None:
     assert app.main(["categories"]) == 1
+
+
+def _make_account_with_income() -> None:
+    config.type_path("wells_fargo_csv").write_text(WELLS_YAML, encoding = "utf-8")
+    app.main(["create", "account", "checking", "wells_fargo_csv"])
+    app.main(["categories", "add", "checking", "Income", "--recursive"])
+    app.main(["categories", "add", "checking", "Income/Paychecks", "--recursive"])
+    app.main(["transactions", "add", "checking", "--date", "2026-01-05",
+              "--amount", "20000.00", "--memo", "pay", "--category", "Income/Paychecks"])
+
+
+def test_budget_add_and_view(capsys: pytest.CaptureFixture) -> None:
+    _make_account_with_income()
+    assert app.main(["budget", "add", "Laptop", "--goal", "1000.00",
+                     "--category", "Income/Paychecks", "--percent", "5",
+                     "--start", "2026-01-01"]) == 0
+    capsys.readouterr()
+    assert app.main(["budget", "view"]) == 0
+    out: str = capsys.readouterr().out
+    assert "Laptop" in out
+    assert "$1000.00" in out       # goal
+    assert "5%" in out             # percentage rate
+    assert "FROZEN" in out         # 5% of $20,000 == $1,000 -> met
+
+
+def test_budget_edit_and_remove(capsys: pytest.CaptureFixture) -> None:
+    _make_account_with_income()
+    app.main(["budget", "add", "Laptop", "--goal", "1000.00",
+              "--category", "Income/Paychecks", "--percent", "5", "--start", "2026-01-01"])
+    budget_id: str = Ledger().list_budgets()[0].id
+    assert app.main(["budget", "edit", budget_id, "--name", "Gaming PC"]) == 0
+    assert Ledger().list_budgets()[0].name == "Gaming PC"
+    assert app.main(["budget", "remove", budget_id]) == 0
+    assert Ledger().list_budgets() == []
+
+
+def test_budget_view_empty(capsys: pytest.CaptureFixture) -> None:
+    assert app.main(["budget", "view"]) == 0
+    assert "No budgets" in capsys.readouterr().out
+
+
+def test_budget_add_bad_percent_returns_error() -> None:
+    _make_account_with_income()
+    assert app.main(["budget", "add", "Laptop", "--goal", "1000.00",
+                     "--category", "Income/Paychecks", "--percent", "nonsense"]) == 1
+
+
+def test_budget_edit_unknown_id_returns_error() -> None:
+    _make_account_with_income()
+    assert app.main(["budget", "edit", "nope", "--name", "X"]) == 1

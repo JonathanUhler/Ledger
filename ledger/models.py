@@ -5,6 +5,7 @@ Core data structures for the ledger.
 
 from dataclasses import dataclass
 import datetime
+from enum import Enum
 import hashlib
 import uuid
 
@@ -65,3 +66,49 @@ class AccountSummary:
     earliest: datetime.date | None
     latest: datetime.date | None
     statement_type: str
+
+
+class BudgetKind(Enum):
+    ONE_TIME = "one_time"
+    # REPEATING = "repeating"  # added when periodic budgets land
+
+
+@dataclass
+class Budget:
+    id: str
+    name: str
+    kind: BudgetKind
+    goal_cents: int
+    category: str
+    account: str | None
+    percent_bps: int
+    start_date: datetime.date
+
+
+@dataclass
+class BudgetProgress:
+    saved_cents: int
+    goal_cents: int
+    remaining_cents: int
+    contributed_cents: int
+    is_met: bool
+    is_frozen: bool
+
+
+def new_budget(name: str,
+               goal_cents: int,
+               category: str,
+               percent_bps: int,
+               account: str | None = None,
+               start_date: datetime.date | None = None,
+               kind: BudgetKind = BudgetKind.ONE_TIME) -> Budget:
+    return Budget(
+        id = uuid.uuid4().hex,
+        name = name,
+        kind = kind,
+        goal_cents = goal_cents,
+        category = category,
+        account = account,
+        percent_bps = percent_bps,
+        start_date = start_date if (start_date is not None) else datetime.date.today(),
+    )

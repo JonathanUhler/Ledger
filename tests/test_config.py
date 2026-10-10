@@ -29,3 +29,8 @@ def test_invalid_account_names_rejected(bad: str) -> None:
 @pytest.mark.parametrize("good", ["checking", "My Account", "acct_1", "a-b"])
 def test_valid_account_names_accepted(good: str) -> None:
     config.validate_account_name(good)
+
+
+def test_budget_paths(ledger_home) -> None:
+    assert config.budget_db_path() == ledger_home / "budgets.db"
+    assert config.budget_backup_path() == ledger_home / "budgets.db.bak"

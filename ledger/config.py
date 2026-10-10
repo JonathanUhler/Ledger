@@ -45,3 +45,11 @@ def account_backup_path(name: str) -> Path:
 
 def type_path(name: str) -> Path:
     return get_types_dir() / f"{name}.yaml"
+
+
+def budget_db_path() -> Path:
+    return get_ledger_home() / "budgets.db"
+
+
+def budget_backup_path() -> Path:
+    return get_ledger_home() / "budgets.db.bak"

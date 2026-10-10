@@ -10,7 +10,7 @@ import yaml
 
 from ledger import config
 from ledger.convert import convert_amount_to_cents, convert_cents_to_amount, \
-    convert_date_to_string, convert_string_to_date
+    convert_bps_to_percent, convert_date_to_string, convert_percent_to_bps, convert_string_to_date
 from ledger.core import search as search_module
 from ledger.core.service import Ledger
 from ledger.cli import render
@@ -197,6 +197,63 @@ def cmd_upgrade(_ledger: Ledger, args: Namespace) -> int:
     return 1 if (failures > 0) else 0
 
 
+def cmd_budget_add(ledger: Ledger, args: Namespace) -> int:
+    budget = ledger.add_budget(name = args.name, goal_cents = args.goal, category = args.category,
+                               percent_bps = args.percent, start_date = args.start,
+                               account = args.account)
+    print(f"Added budget {budget.id}")
+    return 0
+
+
+def cmd_budget_edit(ledger: Ledger, args: Namespace) -> int:
+    fields: dict[str, object] = {}
+    if (args.name is not None):
+        fields["name"] = args.name
+    if (args.goal is not None):
+        fields["goal_cents"] = args.goal
+    if (args.category is not None):
+        fields["category"] = args.category
+    if (args.percent is not None):
+        fields["percent_bps"] = args.percent
+    if (args.account is not None):
+        fields["account"] = args.account
+    if (args.start is not None):
+        fields["start_date"] = args.start
+    ledger.edit_budget(args.id, **fields)
+    print(f"Edited budget {args.id}")
+    return 0
+
+
+def cmd_budget_remove(ledger: Ledger, args: Namespace) -> int:
+    ledger.remove_budget(args.id)
+    print(f"Removed budget {args.id}")
+    return 0
+
+
+def cmd_budget_view(ledger: Ledger, args: Namespace) -> int:
+    budgets = ledger.list_budgets()
+    if (len(budgets) == 0):
+        print("No budgets")
+        return 0
+    for budget in budgets:
+        progress = ledger.budget_progress(budget)
+        scope: str = budget.account if (budget.account) else "all accounts"
+        status: str = "FROZEN" if (progress.is_frozen) \
+            else ("MET" if (progress.is_met) else "in progress")
+        pct: int = 0 if (budget.goal_cents == 0) \
+            else round(progress.saved_cents * 100 / budget.goal_cents)
+        print(f"Budget: {budget.name}  [{budget.id}]")
+        print(f"  Status:    {status}")
+        print(f"  Goal:      {convert_cents_to_amount(budget.goal_cents)}")
+        print(f"  Saved:     {convert_cents_to_amount(progress.saved_cents)} ({pct}%)")
+        print(f"  Remaining: {convert_cents_to_amount(progress.remaining_cents)}")
+        print(f"  Income:    {budget.category} @ {convert_bps_to_percent(budget.percent_bps)} "
+              f"({scope})")
+        print(f"  Since:     {convert_date_to_string(budget.start_date)}")
+        print()
+    return 0
+
+
 def _require_subcommand(_ledger: Ledger, _args: Namespace) -> int:
     print("error: a subcommand is required", file = sys.stderr)
     return 1
@@ -296,6 +353,34 @@ def build_parser() -> ArgumentParser:
     txn_view.add_argument("--invert_signs", action = "store_true")
     txn_view.set_defaults(handler = cmd_txn_view)
 
+    budget_parser = commands.add_parser("budget", help = "manage savings budgets")
+    budget_parser.set_defaults(handler = _require_subcommand)
+    budget_sub = budget_parser.add_subparsers(dest = "subcommand")
+    budget_add = budget_sub.add_parser("add")
+    budget_add.add_argument("name")
+    budget_add.add_argument("--goal", type = convert_amount_to_cents, required = True)
+    budget_add.add_argument("--category", required = True)
+    budget_add.add_argument("--percent", type = convert_percent_to_bps, required = True)
+    budget_add.add_argument("--account", default = None)
+    budget_add.add_argument("--start", type = convert_string_to_date, default = None,
+                            metavar = "YYYY-MM-DD")
+    budget_add.set_defaults(handler = cmd_budget_add)
+    budget_edit = budget_sub.add_parser("edit")
+    budget_edit.add_argument("id")
+    budget_edit.add_argument("--name", default = None)
+    budget_edit.add_argument("--goal", type = convert_amount_to_cents, default = None)
+    budget_edit.add_argument("--category", default = None)
+    budget_edit.add_argument("--percent", type = convert_percent_to_bps, default = None)
+    budget_edit.add_argument("--account", default = None)
+    budget_edit.add_argument("--start", type = convert_string_to_date, default = None,
+                             metavar = "YYYY-MM-DD")
+    budget_edit.set_defaults(handler = cmd_budget_edit)
+    budget_remove = budget_sub.add_parser("remove")
+    budget_remove.add_argument("id")
+    budget_remove.set_defaults(handler = cmd_budget_remove)
+    budget_view = budget_sub.add_parser("view")
+    budget_view.set_defaults(handler = cmd_budget_view)
+
     upgrade_parser = commands.add_parser("upgrade", help = "upgrade v1 accounts to v2")
     upgrade_parser.add_argument("account", nargs = "*", default = [])
     upgrade_parser.add_argument("--force", action = "store_true")
@@ -306,7 +391,10 @@ def build_parser() -> ArgumentParser:
 
 def main(argv: list[str]) -> int:
     parser: ArgumentParser = build_parser()
-    args: Namespace = parser.parse_args(argv)
+    try:
+        args: Namespace = parser.parse_args(argv)
+    except SystemExit as exit_error:
+        return 1 if (exit_error.code not in (0, None)) else 0
     if (getattr(args, "handler", None) is None):
         parser.print_usage()
         return 1

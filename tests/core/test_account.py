@@ -78,3 +78,29 @@ def test_backup_created_on_mutation(ledger_home) -> None:
     acct.add_transaction(_txn())
     assert (ledger_home / "accounts" / "checking.db.bak").exists()
     acct.close()
+
+
+def test_list_category_since_filters_exact_category_and_date() -> None:
+    acct: Account = Account.create("checking", "wells_fargo_csv")
+    acct.add_category("Income")
+    acct.add_category("Income/Paychecks")
+    acct.add_category("Food")
+
+    def pay(day: int, cents: int, category: str):
+        return new_transaction(date = datetime.date(2026, 1, day), cents = cents,
+                               statement_memo = "pay", account = "checking", category = category)
+
+    acct.add_many([
+        pay(1, 1000, "Income/Paychecks"),   # on start date -> counts
+        pay(2, 2000, "Income/Paychecks"),
+        pay(2, 500, "Income"),               # different (parent) category -> excluded
+        pay(3, 9999, "Food"),                # different category -> excluded
+    ])
+    # a paycheck dated before the start date -> excluded
+    acct.add_transaction(new_transaction(
+        date = datetime.date(2025, 12, 31), cents = 7777, statement_memo = "pay",
+        account = "checking", category = "Income/Paychecks"))
+
+    rows = acct.list_category_since("Income/Paychecks", datetime.date(2026, 1, 1))
+    assert [t.cents for t in rows] == [1000, 2000]
+    acct.close()

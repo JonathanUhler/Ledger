@@ -7,6 +7,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Footer, Header, TabbedContent, TabPane
 
 from ledger.tui.screens.accounts import AccountsScreen
+from ledger.tui.screens.budgets import BudgetsScreen
 from ledger.tui.screens.categories import CategoriesScreen
 from ledger.tui.screens.create import CreateScreen
 from ledger.tui.screens.transactions import TransactionsScreen
@@ -29,6 +30,8 @@ class LedgerApp(App):
                 yield CreateScreen()
             with TabPane("Transactions", id = "tab_transactions"):
                 yield TransactionsScreen()
+            with TabPane("Budgets", id = "tab_budgets"):
+                yield BudgetsScreen()
             with TabPane("Upgrade", id = "tab_upgrade"):
                 yield UpgradeScreen()
         yield Footer()

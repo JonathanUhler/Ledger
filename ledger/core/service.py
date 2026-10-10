@@ -9,8 +9,11 @@ from ledger import config
 from ledger.core import reconcile as reconcile_module
 from ledger.core import search as search_module
 from ledger.core.account import Account
-from ledger.errors import InvalidCategoryError
-from ledger.models import AccountSummary, Transaction, compute_content_hash, new_transaction
+from ledger.core.budget_store import BudgetStore
+from ledger.convert import round_half_up, convert_date_to_string
+from ledger.errors import InvalidCategoryError, InvalidBudgetError
+from ledger.models import AccountSummary, Budget, BudgetKind, BudgetProgress, Transaction, \
+    compute_content_hash, new_budget, new_transaction
 from ledger.statements import csv_grammar, grammar
 
 
@@ -198,3 +201,106 @@ class Ledger:
             )
         finally:
             acct.close()
+
+    def list_budgets(self) -> list[Budget]:
+        if (not config.budget_db_path().exists()):
+            return []
+        store: BudgetStore = BudgetStore.open()
+        try:
+            return store.list_budgets()
+        finally:
+            store.close()
+
+    def _validate_budget(self, name: str, goal_cents: int, category: str, percent_bps: int,
+                         account: str | None) -> None:
+        if (name.strip() == ""):
+            raise InvalidBudgetError("budget name must not be empty")
+        if (goal_cents <= 0):
+            raise InvalidBudgetError("budget goal must be a positive amount")
+        if (not (0 < percent_bps <= 10000)):
+            raise InvalidBudgetError("budget percentage must be greater than 0% and at most 100%")
+        if (account is not None and account != ""):
+            if (account not in self.all_account_names()):
+                raise InvalidBudgetError(f"account '{account}' does not exist")
+            if (category not in self.list_categories(account)):
+                raise InvalidBudgetError(
+                    f"category '{category}' does not exist in account '{account}'")
+            return
+        for existing in self.all_account_names():
+            if (category in self.list_categories(existing)):
+                return
+        raise InvalidBudgetError(f"category '{category}' does not exist in any account")
+
+    def add_budget(self, name: str, goal_cents: int, category: str, percent_bps: int,
+                   start_date: datetime.date | None = None, account: str | None = None) -> Budget:
+        account = account if (account) else None
+        self._validate_budget(name, goal_cents, category, percent_bps, account)
+        budget: Budget = new_budget(name = name, goal_cents = goal_cents, category = category,
+                                    percent_bps = percent_bps, account = account,
+                                    start_date = start_date)
+        store: BudgetStore = BudgetStore.open()
+        try:
+            store.add_budget(budget)
+        finally:
+            store.close()
+        return budget
+
+    def edit_budget(self, budget_id: str, **fields: object) -> Budget:
+        store: BudgetStore = BudgetStore.open()
+        try:
+            current: Budget = store.get_budget(budget_id)
+            name = str(fields.get("name", current.name))
+            goal_cents = int(fields.get("goal_cents", current.goal_cents))
+            category = str(fields.get("category", current.category))
+            percent_bps = int(fields.get("percent_bps", current.percent_bps))
+            raw_account = fields.get("account", current.account)
+            account = str(raw_account) if (raw_account) else None
+            self._validate_budget(name, goal_cents, category, percent_bps, account)
+            apply_fields: dict[str, object] = dict(fields)
+            if ("account" in apply_fields):
+                apply_fields["account"] = account
+            return store.edit_budget(budget_id, **apply_fields)
+        finally:
+            store.close()
+
+    def remove_budget(self, budget_id: str) -> None:
+        store: BudgetStore = BudgetStore.open()
+        try:
+            store.remove_budget(budget_id)
+        finally:
+            store.close()
+
+    def budget_progress(self, budget: Budget) -> BudgetProgress:
+        if (budget.account):
+            names: list[str] = [budget.account] if (budget.account in self.all_account_names()) \
+                else []
+        else:
+            names = self.all_account_names()
+
+        contributions: list[Transaction] = []
+        for name in names:
+            acct: Account = Account.open(name)
+            try:
+                contributions += acct.list_category_since(budget.category, budget.start_date)
+            finally:
+                acct.close()
+        contributions.sort(key = lambda txn: (convert_date_to_string(txn.date), txn.id))
+
+        contributed: int = 0
+        saved: int = 0
+        frozen: bool = False
+        for txn in contributions:
+            contributed += txn.cents
+            saved = round_half_up(budget.percent_bps * contributed, 10000)
+            if (budget.kind is BudgetKind.ONE_TIME and saved >= budget.goal_cents):
+                frozen = True
+                break
+
+        return BudgetProgress(
+            saved_cents = saved,
+            goal_cents = budget.goal_cents,
+            remaining_cents = budget.goal_cents - saved,
+            contributed_cents = contributed,
+            is_met = saved >= budget.goal_cents,
+            is_frozen = frozen,
+        )

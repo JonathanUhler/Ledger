@@ -52,3 +52,33 @@ def test_bad_date_raises() -> None:
 def test_normalize_string() -> None:
     assert convert.normalize_string("  Blue   Bottle\tCOFFEE ") == "blue bottle coffee"
     assert convert.normalize_string(None) == ""
+
+
+def test_convert_percent_to_bps() -> None:
+    assert convert.convert_percent_to_bps("5") == 500
+    assert convert.convert_percent_to_bps("5.5") == 550
+    assert convert.convert_percent_to_bps("5%") == 500
+    assert convert.convert_percent_to_bps("100") == 10000
+    assert convert.convert_percent_to_bps("0.01") == 1
+
+
+def test_convert_percent_to_bps_rejects_bad_input() -> None:
+    with pytest.raises(AmountConversionError):
+        convert.convert_percent_to_bps("")
+    with pytest.raises(AmountConversionError):
+        convert.convert_percent_to_bps("abc")
+
+
+def test_convert_bps_to_percent() -> None:
+    assert convert.convert_bps_to_percent(500) == "5%"
+    assert convert.convert_bps_to_percent(550) == "5.5%"
+    assert convert.convert_bps_to_percent(525) == "5.25%"
+    assert convert.convert_bps_to_percent(5000) == "50%"
+    assert convert.convert_bps_to_percent(10000) == "100%"
+
+
+def test_round_half_up() -> None:
+    assert convert.round_half_up(5, 2) == 3        # 2.5 -> 3 (away from zero)
+    assert convert.round_half_up(-5, 2) == -3      # -2.5 -> -3 (away from zero)
+    assert convert.round_half_up(1, 3) == 0
+    assert convert.round_half_up(500 * 2000000, 10000) == 100000   # 5% of $20,000

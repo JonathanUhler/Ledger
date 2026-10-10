@@ -79,3 +79,15 @@ class MigrationError(LedgerError):
     """
     A data-model migration failed a sanity check.
     """
+
+
+class InvalidBudgetError(LedgerError, ValueError):
+    """
+    A budget definition is missing required data or has an invalid value.
+    """
+
+
+class MissingBudgetError(LedgerError, FileNotFoundError):
+    """
+    A specified budget does not exist, or the budget store is unreadable by this app version.
+    """

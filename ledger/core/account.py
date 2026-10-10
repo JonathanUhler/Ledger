@@ -120,6 +120,13 @@ class Account:
                 for row in self._conn.execute(
                     "SELECT * FROM transactions WHERE content_hash = ?", (content_hash,))]
 
+    def list_category_since(self, category: str, start: datetime.date) -> list[Transaction]:
+        return [_row_to_transaction(row)
+                for row in self._conn.execute(
+                    "SELECT * FROM transactions WHERE category = ? AND date >= ? "
+                    "ORDER BY date ASC, id ASC",
+                    (category, convert_date_to_string(start)))]
+
     def add_transaction(self, txn: Transaction) -> None:
         self.add_many([txn])
 

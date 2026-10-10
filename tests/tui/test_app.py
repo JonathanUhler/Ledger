@@ -2,7 +2,7 @@ import asyncio
 import datetime
 
 from textual.css.scalar import Unit
-from textual.widgets import DataTable, Input, TabbedContent
+from textual.widgets import DataTable, Input, ProgressBar, TabbedContent
 
 from ledger import config
 from ledger.core import search
@@ -79,5 +79,49 @@ def test_edit_button_updates_transaction() -> None:
             stored = ledger.search(["checking"], [search.unconditional()])
             assert len(stored) == 1
             assert stored[0].category == "Rent"
+
+    asyncio.run(scenario())
+
+
+def test_budgets_tab_lists_progress_bars() -> None:
+    ledger: Ledger = _seed_account()
+    ledger.add_category("checking", "Income/Paychecks", recursive = True)
+    ledger.add_transaction("checking", new_transaction(
+        date = datetime.date(2026, 1, 5), cents = 2000000, statement_memo = "pay",
+        account = "checking", category = "Income/Paychecks"))
+    ledger.add_budget(name = "Laptop", goal_cents = 100000, category = "Income/Paychecks",
+                      percent_bps = 500, start_date = datetime.date(2026, 1, 1))
+
+    async def scenario() -> None:
+        app: LedgerApp = LedgerApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one(TabbedContent).active = "tab_budgets"
+            await pilot.pause()
+            await pilot.click("#budget_load")
+            await pilot.pause()
+            bars = list(app.query(ProgressBar))
+            assert len(bars) == 1
+
+    asyncio.run(scenario())
+
+
+def test_budgets_tab_add_button_creates_budget() -> None:
+    ledger: Ledger = _seed_account()
+    ledger.add_category("checking", "Income/Paychecks", recursive = True)
+
+    async def scenario() -> None:
+        app: LedgerApp = LedgerApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one(TabbedContent).active = "tab_budgets"
+            await pilot.pause()
+            app.query_one("#budget_name", Input).value = "Laptop"
+            app.query_one("#budget_goal", Input).value = "1000.00"
+            app.query_one("#budget_category", Input).value = "Income/Paychecks"
+            app.query_one("#budget_percent", Input).value = "5"
+            await pilot.click("#budget_add")
+            await pilot.pause()
+            assert [b.name for b in ledger.list_budgets()] == ["Laptop"]
 
     asyncio.run(scenario())

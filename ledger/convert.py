@@ -4,7 +4,7 @@ Conversions between the ledger's canonical types and human/statement strings.
 
 
 import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 
 from ledger.errors import AmountConversionError, DateConversionError
@@ -45,3 +45,23 @@ def convert_date_to_string(date: datetime.date, date_format: str = "%Y-%m-%d") -
     if (not isinstance(date, datetime.date)):
         return str(date)
     return date.strftime(date_format)
+
+
+def convert_percent_to_bps(percent: str) -> int:
+    cleaned: str = percent.replace("%", "").strip()
+    if (cleaned == ""):
+        raise AmountConversionError(f"cannot convert percentage '{percent}'")
+    try:
+        return int((Decimal(cleaned) * 100).to_integral_value(rounding = ROUND_HALF_UP))
+    except (InvalidOperation, ValueError) as error:
+        raise AmountConversionError(f"cannot convert percentage '{percent}'") from error
+
+
+def convert_bps_to_percent(bps: int) -> str:
+    value: Decimal = (Decimal(bps) / Decimal(100)).normalize()
+    return f"{format(value, 'f')}%"
+
+
+def round_half_up(numerator: int, denominator: int) -> int:
+    quotient: Decimal = Decimal(numerator) / Decimal(denominator)
+    return int(quotient.to_integral_value(rounding = ROUND_HALF_UP))
